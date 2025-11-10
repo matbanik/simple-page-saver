@@ -273,11 +273,13 @@ async function extractPageData(tabId) {
 
 // Process HTML with backend
 async function processWithBackend(url, html, title) {
-    // Get API URL from chrome.storage (service workers can't use localStorage)
-    const storage = await chrome.storage.local.get(['apiEndpoint']);
+    // Get API URL and AI setting from chrome.storage
+    const storage = await chrome.storage.local.get(['apiEndpoint', 'enableAI']);
     const apiUrl = storage.apiEndpoint || API_BASE_URL;
+    const enableAI = storage.enableAI ?? false; // Default to false (use fallback)
 
     console.log('[Backend] Using API URL:', apiUrl);
+    console.log('[Backend] AI enabled:', enableAI);
     console.log('[Backend] Sending request to /process-html');
 
     const response = await fetch(`${apiUrl}/process-html`, {
@@ -285,7 +287,12 @@ async function processWithBackend(url, html, title) {
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ url, html, title })
+        body: JSON.stringify({
+            url,
+            html,
+            title,
+            use_ai: enableAI  // Pass AI preference to backend
+        })
     });
 
     console.log('[Backend] Response status:', response.status);
@@ -326,17 +333,24 @@ async function extractLinks(html, baseUrl) {
 
 // Download file
 async function downloadFile(content, filename) {
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
+    console.log('[Download] Creating download for:', filename);
 
-    await chrome.downloads.download({
-        url,
-        filename,
-        saveAs: false
-    });
+    // Convert content to data URL (works in service workers, unlike URL.createObjectURL)
+    const base64Content = btoa(unescape(encodeURIComponent(content)));
+    const dataUrl = `data:text/plain;base64,${base64Content}`;
 
-    // Clean up
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    try {
+        const downloadId = await chrome.downloads.download({
+            url: dataUrl,
+            filename: filename,
+            saveAs: false
+        });
+
+        console.log('[Download] Download started, ID:', downloadId);
+    } catch (error) {
+        console.error('[Download] Download failed:', error);
+        throw new Error(`Download failed: ${error.message}`);
+    }
 }
 
 // Create and download ZIP file
