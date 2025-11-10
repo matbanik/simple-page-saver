@@ -74,10 +74,6 @@ async function handleExtractSinglePage(url) {
         const pageData = await extractPageData(tab.id);
         console.log('[Extract] HTML extracted, size:', pageData.html.length, 'chars');
 
-        // Close the tab
-        console.log('[Extract] Closing tab...');
-        await chrome.tabs.remove(tab.id);
-
         // Send to backend for processing
         console.log('[Extract] Sending to backend...');
         const result = await processWithBackend(url, pageData.html, pageData.title);
@@ -92,6 +88,15 @@ async function handleExtractSinglePage(url) {
             console.log('[Extract] Downloading media links file...');
             const mediaContent = result.media_urls.join('\n');
             await downloadFile(mediaContent, 'media_links.txt');
+        }
+
+        // Close the tab after processing is complete (don't block on errors)
+        console.log('[Extract] Closing tab...');
+        try {
+            await chrome.tabs.remove(tab.id);
+        } catch (tabError) {
+            console.warn('[Extract] Could not close tab:', tabError.message);
+            // Not a fatal error, continue
         }
 
         console.log('[Extract] Success!');
@@ -134,10 +139,16 @@ async function handleMapSite(startUrl, depth) {
 
             try {
                 const pageData = await extractPageData(tab.id);
-                await chrome.tabs.remove(tab.id);
 
                 // Extract links using backend
                 const links = await extractLinks(pageData.html, url);
+
+                // Close tab after extraction
+                try {
+                    await chrome.tabs.remove(tab.id);
+                } catch (tabError) {
+                    console.warn('[Map] Could not close tab:', tabError.message);
+                }
 
                 // Process internal links for deeper crawling
                 if (level < depth) {
@@ -199,15 +210,16 @@ async function handleExtractMultiplePages(urls, outputZip) {
         sendProgressUpdate(0, urls.length, 'Starting extraction...');
 
         for (const url of urls) {
+            let tabId = null;
             try {
                 // Open tab
                 const tab = await chrome.tabs.create({ url, active: false });
+                tabId = tab.id;
                 await waitForTabLoad(tab.id);
                 await sleep(DELAY_AFTER_LOAD);
 
                 // Extract data
                 const pageData = await extractPageData(tab.id);
-                await chrome.tabs.remove(tab.id);
 
                 // Process with backend
                 const result = await processWithBackend(url, pageData.html, pageData.title);
@@ -219,11 +231,26 @@ async function handleExtractMultiplePages(urls, outputZip) {
                     result.media_urls.forEach(url => allMediaUrls.add(url));
                 }
 
+                // Close tab after successful processing
+                try {
+                    await chrome.tabs.remove(tabId);
+                } catch (tabError) {
+                    console.warn('[Extract] Could not close tab:', tabError.message);
+                }
+
                 processed++;
                 sendProgressUpdate(processed, urls.length, `Processed: ${result.filename}`);
 
             } catch (error) {
                 console.error(`Error processing ${url}:`, error);
+                // Try to close tab if it was created
+                if (tabId) {
+                    try {
+                        await chrome.tabs.remove(tabId);
+                    } catch (tabError) {
+                        console.warn('[Extract] Could not close tab after error:', tabError.message);
+                    }
+                }
                 processed++;
                 sendProgressUpdate(processed, urls.length, `Error: ${url}`);
             }
