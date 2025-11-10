@@ -13,7 +13,32 @@ Use this to debug connection timeout issues, lock deadlocks, resource leaks, and
 
 ## Enabling Diagnostic Mode
 
-### Method 1: Environment Variable (Recommended)
+### Method 1: GUI Checkbox (Recommended - Easiest!)
+
+1. **Launch GUI**:
+   ```bash
+   cd backend
+   python launcher.py -gui
+   # Or double-click: start_gui.bat (Windows)
+   ```
+
+2. **Enable Diagnostic Mode**:
+   - Check the "Enable Diagnostic Mode" checkbox in Settings
+   - Click "Save Settings"
+   - Click "Start Server" (or restart if already running)
+
+3. **View Diagnostic Report**:
+   - Click "View Diagnostic Report" button in Testing section
+   - Shows real-time status: threads, locks, requests in progress
+   - Warns if issues detected (hung requests, held locks)
+
+**Benefits**:
+- ✓ No need to set environment variables
+- ✓ Persists across restarts (saved in settings.json)
+- ✓ Visual indicator when enabled
+- ✓ Built-in report viewer in GUI
+
+### Method 2: Environment Variable (Advanced)
 
 **Linux/Mac:**
 ```bash
@@ -36,7 +61,7 @@ cd backend
 python launcher.py
 ```
 
-### Method 2: Inline with Command
+### Method 3: Inline with Command
 
 **Linux/Mac:**
 ```bash
