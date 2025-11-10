@@ -15,22 +15,27 @@ Simple Page Saver is a full-featured web content extraction tool that:
 
 ### Chrome Extension
 - **Single Page Extraction** - One-click conversion of current page
+- **Selective Downloads** - Choose to download content, media links, external links, or all
+- **Job Tracking** - Visual job list with real-time progress that persists across popup closes
 - **Site Mapping** - Discover and map entire sites (0-3 levels deep)
 - **Batch Processing** - Extract multiple pages with progress tracking
 - **Link Categorization** - Automatic sorting (internal/external/media)
 - **ZIP Downloads** - Bundle multiple pages into single archive
 - **AI Toggle** - Control costs with on/off switch
 - **Custom AI Instructions** - 7 preset templates for common tasks
-- **Visual Feedback** - Real-time progress and status updates
+- **Connection Management** - Automatic reconnection with retry logic and health monitoring
+- **Visual Feedback** - Real-time progress, status updates, and connection status indicator
 
 ### Backend Server
 - **GUI Management Interface** - Configure and control server visually
 - **Command-Line Support** - Full control via arguments
+- **Job Management** - Track all processing jobs with UUID-based identification
 - **Encrypted Settings** - API keys stored securely
-- **Advanced Logging** - Configurable levels with API key masking
-- **Multi-Stage Processing** - 70-90% HTML size reduction
+- **Advanced Logging** - Configurable levels with full OpenRouter request/response visibility
+- **Smart Preprocessing** - 3-tier mode system (light/medium/aggressive) with safety checks
 - **AI Integration** - OpenRouter API with multiple model support
-- **Offline Fallback** - Works without AI using html2text
+- **Intelligent Fallback Chain** - AI → Trafilatura → html2text with 3 extraction modes
+- **Extraction Modes** - Balanced, Recall (more content), Precision (cleaner output)
 - **Standalone Executable** - Single .exe file distribution
 
 ### Security & Privacy
@@ -114,8 +119,16 @@ SimplePageSaver.exe --help
 **Extract Single Page**:
 1. Navigate to any webpage
 2. Click extension icon
-3. Click "Extract Current Page"
-4. Markdown file downloads automatically
+3. Monitor connection status (green indicator = connected)
+4. Select download options:
+   - ☑ Download page content (markdown)
+   - ☐ Download media links (txt file)
+   - ☐ Download external links (txt file)
+   - ☐ Create ZIP file
+5. Choose extraction mode (Balanced/Recall/Precision)
+6. Click "Extract Current Page"
+7. Watch real-time progress in job tracker
+8. Files download automatically when complete
 
 **Extract Multiple Pages**:
 1. Navigate to a website
@@ -125,6 +138,14 @@ SimplePageSaver.exe --help
 5. Select URLs to extract
 6. Choose "Download as ZIP"
 7. Click "Extract Selected Pages"
+8. Monitor progress in active jobs section
+
+**Job Tracking**:
+- View all active and recent jobs in popup
+- Color-coded status: 🟢 Completed, 🟡 Processing, 🔴 Failed, ⚪ Pending
+- Click any job to see details
+- Jobs persist across popup closes (stored on backend)
+- Auto-refresh every 5 seconds
 
 **Custom AI Instructions**:
 1. Enable AI in extension
@@ -161,19 +182,26 @@ extension/
 backend/
 ├── launcher.py            # Unified entry point (CLI support)
 ├── gui.py                 # Tkinter management interface
-├── main_updated.py        # FastAPI application
+├── main.py                # FastAPI application with job endpoints
 ├── settings_manager.py    # Encrypted settings storage
 ├── logging_config.py      # Advanced logging system
-├── preprocessing.py       # HTML preprocessing pipeline
-├── ai_converter.py        # OpenRouter API integration
+├── preprocessing.py       # Smart 3-tier HTML preprocessing
+├── ai_converter.py        # AI + Trafilatura + html2text chain
+├── job_manager.py         # Job tracking and persistence
 └── build.py              # Executable builder
 ```
 
 **Processing Pipeline**:
-1. **Stage 1 - Aggressive Stripping**: Remove scripts, styles, tracking
-2. **Stage 2 - Content Isolation**: Extract main content using readability
-3. **Stage 3 - Semantic Simplification**: Keep only semantic HTML
-4. **AI Conversion**: OpenRouter API or html2text fallback
+1. **Stage 1 - Smart Preprocessing**:
+   - Light mode: Remove scripts/styles only (default)
+   - Medium mode: Remove navigation and ads
+   - Aggressive mode: Readability extraction with 80% safety check
+2. **Stage 2 - Link Extraction**: Categorize internal/external/media links
+3. **Stage 3 - Conversion Chain**:
+   - Try AI (OpenRouter) if API key configured
+   - Fallback to Trafilatura with extraction mode (balanced/recall/precision)
+   - Final fallback to html2text
+4. **Stage 4 - Job Tracking**: Update progress and store results
 5. **Output**: Clean markdown with preserved links and structure
 
 ## Configuration
@@ -249,7 +277,7 @@ cd backend
 GET http://localhost:8077/
 ```
 
-**Process HTML** (with custom prompt support):
+**Process HTML** (with custom prompt and extraction mode):
 ```json
 POST /process-html
 {
@@ -257,7 +285,9 @@ POST /process-html
   "html": "<html>...</html>",
   "title": "Page Title",
   "use_ai": true,
-  "custom_prompt": "Extract product details..."
+  "custom_prompt": "Extract product details...",
+  "extraction_mode": "balanced",
+  "job_id": "optional-existing-job-id"
 }
 ```
 
@@ -277,6 +307,13 @@ POST /estimate-cost
   "html": "<html>...</html>",
   "model": "deepseek/deepseek-chat"
 }
+```
+
+**Job Management**:
+```
+GET /jobs?status=processing&limit=50   # List jobs
+GET /jobs/{job_id}                     # Get job details
+DELETE /jobs/{job_id}                  # Delete job
 ```
 
 **Interactive Docs**: `http://localhost:8077/docs`
@@ -310,17 +347,34 @@ POST /estimate-cost
 3. Click "Reload" if already loaded
 4. Check console for JavaScript errors
 
+**Connection indicator shows red/orange**:
+1. Verify backend is running (check logs or GUI)
+2. Extension automatically retries with exponential backoff
+3. Orange = attempting reconnection (wait 30s for health check)
+4. Green = connected and healthy
+5. Extension will auto-reconnect when backend restarts
+
 **No downloads**:
-1. Verify backend is running
-2. Test with GUI "Test Backend Health" button
-3. Check Chrome download settings
-4. Look at service worker console (click "service worker" link)
+1. Check connection status indicator (should be green)
+2. Verify backend is running
+3. Test with GUI "Test Backend Health" button
+4. Check Chrome download settings
+5. Look at service worker console (click "service worker" link)
+6. Review active jobs section for errors
 
 **AI not working**:
 1. Enable AI toggle in extension
 2. Test with GUI "Test AI Connection" button
 3. Check API key in backend settings
-4. Review backend logs for errors
+4. Review backend logs for OpenRouter request/response details
+5. Try different extraction mode (Recall for more content)
+
+**Jobs not showing progress**:
+1. Check backend connection (green indicator)
+2. Click "Refresh" button in jobs section
+3. Jobs auto-refresh every 5 seconds
+4. Check service worker console for errors
+5. Verify backend `/jobs` endpoint is accessible
 
 ### Extension Console Debugging
 
@@ -342,18 +396,20 @@ simple-page-saver/
 ├── extension/                  # Chrome extension
 │   ├── manifest.json
 │   ├── popup.html/js
-│   ├── background.js
+│   ├── background.js          # Connection management & retry logic
 │   ├── content-script.js
 │   └── jszip.min.js
 ├── backend/                    # Python backend
 │   ├── launcher.py            # Entry point (CLI)
 │   ├── gui.py                 # Management GUI
-│   ├── main_updated.py        # FastAPI app
+│   ├── main.py                # FastAPI app with job endpoints
+│   ├── job_manager.py         # Job tracking and persistence
 │   ├── settings_manager.py    # Encrypted settings
 │   ├── logging_config.py      # Logging system
-│   ├── preprocessing.py       # HTML processing
-│   ├── ai_converter.py        # AI integration
+│   ├── preprocessing.py       # 3-tier HTML preprocessing
+│   ├── ai_converter.py        # AI + Trafilatura + html2text
 │   ├── build.py              # Executable builder
+│   ├── requirements.txt       # Python dependencies
 │   ├── start_gui.bat         # GUI launcher
 │   └── start_server.bat      # Server launcher
 ├── logs/                      # Server logs
@@ -404,6 +460,43 @@ Select from 7 presets or write custom instructions:
 6. **Specifications** - Detailed spec tables
 7. **Links Summary** - Categorized link lists
 
+### Extraction Modes
+
+Choose the optimal fallback extraction strategy:
+- **Balanced** (default) - Standard precision/recall tradeoff
+- **Recall** - Captures more content, may include some noise
+- **Precision** - Cleaner output, may miss some peripheral content
+
+Works with Trafilatura fallback when AI is unavailable or disabled.
+
+### Selective Downloads
+
+Choose exactly what to download:
+- **Page Content** - Markdown-formatted main content
+- **Media Links** - List of all images, videos, audio files
+- **External Links** - List of all outbound links
+- **ZIP Packaging** - Bundle everything in single archive
+
+All options work independently or together.
+
+### Job Tracking & Persistence
+
+- **UUID-Based Jobs** - Every operation tracked with unique ID
+- **Persistent Storage** - Jobs survive popup closes and browser restarts
+- **Real-Time Progress** - Current step, percentage, status message
+- **Status Indicators** - Visual color-coded status (pending/processing/completed/failed)
+- **Auto-Refresh** - Jobs list updates every 5 seconds
+- **Click Details** - Click any job to see full information
+- **Backend Storage** - Jobs stored on server, accessible from any tab
+
+### Connection Management
+
+- **Health Monitoring** - Backend checked every 30 seconds
+- **Automatic Retry** - 3 attempts with exponential backoff (2s, 4s, 8s)
+- **Visual Status** - Green/orange/red indicator in popup
+- **Auto-Reconnect** - Seamlessly reconnects when backend restarts
+- **Graceful Degradation** - Clear error messages when backend unavailable
+
 ### Batch Processing
 
 - Process up to 100s of pages
@@ -417,7 +510,8 @@ Select from 7 presets or write custom instructions:
 
 - Daily log rotation
 - Real-time log viewer in GUI
-- Comprehensive request/response logging
+- Comprehensive OpenRouter request/response logging (API key masked)
+- Full request details visible in logs
 - Performance metrics
 - Error tracking
 
@@ -445,6 +539,7 @@ MIT License - Free to use and modify
 **Built with**:
 - FastAPI - Modern Python web framework
 - BeautifulSoup & readability-lxml - HTML parsing
+- Trafilatura - Intelligent content extraction
 - html2text - Markdown conversion fallback
 - OpenRouter - AI API gateway
 - JSZip - ZIP file creation
@@ -454,8 +549,18 @@ MIT License - Free to use and modify
 
 ## Version
 
-**Current Version**: 2.0
-**Last Updated**: 2025-01-10
+**Current Version**: 2.1
+**Last Updated**: 2025-11-10
+
+### What's New in 2.1
+- ✨ Job tracking system with persistence across popup closes
+- 🔄 Automatic reconnection with retry logic and health monitoring
+- 🎯 Trafilatura integration with 3 extraction modes (Balanced/Recall/Precision)
+- ☑️ Selective download options (content, media links, external links)
+- 🟢 Visual connection status indicator
+- 📊 Real-time job progress display with color-coded status
+- 🔧 Smart 3-tier preprocessing (light/medium/aggressive) with safety checks
+- 📝 Enhanced OpenRouter logging with full request/response visibility
 
 ---
 
