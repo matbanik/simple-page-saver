@@ -63,6 +63,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load AI enabled setting
     await loadAISettings();
 
+    // Load extraction mode setting
+    await loadExtractionMode();
+
+    // Save extraction mode on change
+    document.getElementById('extraction-mode').addEventListener('change', async (e) => {
+        await chrome.storage.local.set({ extractionMode: e.target.value });
+        console.log('[Settings] Extraction mode saved:', e.target.value);
+    });
+
     // Load saved custom prompt
     const storage = await chrome.storage.local.get(['customPrompt']);
     const customPromptTextarea = document.getElementById('custom-prompt');
@@ -361,6 +370,16 @@ async function loadAISettings() {
     updateAIStatus(enableAI);
 
     console.log('[Settings] AI enabled:', enableAI);
+}
+
+// Load extraction mode settings
+async function loadExtractionMode() {
+    const storage = await chrome.storage.local.get(['extractionMode']);
+    const extractionMode = storage.extractionMode || 'balanced'; // Default to balanced
+
+    document.getElementById('extraction-mode').value = extractionMode;
+
+    console.log('[Settings] Extraction mode:', extractionMode);
 }
 
 // Handle AI toggle

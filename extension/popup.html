@@ -407,6 +407,21 @@
         </label>
         <div id="ai-status" style="font-size: 11px; color: #666; padding: 4px 8px; background: #f0f0f0; border-radius: 3px; display: none;"></div>
 
+        <div style="margin-top: 12px;">
+            <label style="font-size: 12px; font-weight: 500; display: block; margin-bottom: 4px;">
+                Fallback Extraction Mode:
+                <span style="font-size: 10px; color: #999; font-weight: normal;">(when AI is disabled)</span>
+            </label>
+            <select id="extraction-mode" style="width: 100%; padding: 6px; font-size: 12px; margin-bottom: 4px;">
+                <option value="balanced">Balanced - Standard extraction</option>
+                <option value="recall">Recall - Capture more content (less filtering)</option>
+                <option value="precision">Precision - Cleaner output (more filtering)</option>
+            </select>
+            <div style="font-size: 10px; color: #666; padding: 4px; background: #f9f9f9; border-radius: 3px;">
+                Uses Trafilatura for intelligent content extraction without AI
+            </div>
+        </div>
+
         <div id="ai-prompt-section" style="display: none; margin-top: 12px;">
             <label style="font-size: 12px; font-weight: 500; display: block; margin-bottom: 4px;">Custom AI Instructions:</label>
             <select id="prompt-presets" style="width: 100%; padding: 6px; margin-bottom: 6px; font-size: 12px;">

@@ -697,14 +697,16 @@ async function checkBackendHealth() {
 
 // Process HTML with backend (with retry logic)
 async function processWithBackend(url, html, title) {
-    // Get API URL, AI setting, and custom prompt from chrome.storage
-    const storage = await chrome.storage.local.get(['apiEndpoint', 'enableAI', 'customPrompt']);
+    // Get API URL, AI setting, custom prompt, and extraction mode from chrome.storage
+    const storage = await chrome.storage.local.get(['apiEndpoint', 'enableAI', 'customPrompt', 'extractionMode']);
     const apiUrl = storage.apiEndpoint || API_BASE_URL;
     const enableAI = storage.enableAI ?? false; // Default to false (use fallback)
     const customPrompt = storage.customPrompt || '';
+    const extractionMode = storage.extractionMode || 'balanced'; // Default to balanced
 
     console.log('[Backend] Using API URL:', apiUrl);
     console.log('[Backend] AI enabled:', enableAI);
+    console.log('[Backend] Extraction mode:', extractionMode);
     if (customPrompt) {
         console.log('[Backend] Custom prompt:', customPrompt.substring(0, 100) + '...');
     }
@@ -723,7 +725,8 @@ async function processWithBackend(url, html, title) {
                     html,
                     title,
                     use_ai: enableAI,
-                    custom_prompt: customPrompt
+                    custom_prompt: customPrompt,
+                    extraction_mode: extractionMode
                 }),
                 signal: AbortSignal.timeout(120000) // 120 second timeout for large pages
             });

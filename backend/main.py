@@ -65,6 +65,7 @@ class ProcessHTMLRequest(BaseModel):
     title: Optional[str] = ""
     use_ai: Optional[bool] = True
     custom_prompt: Optional[str] = ""
+    extraction_mode: Optional[str] = "balanced"  # 'balanced', 'recall', 'precision'
     job_id: Optional[str] = None  # If provided, update existing job
 
 
@@ -182,14 +183,20 @@ async def process_html(request: ProcessHTMLRequest):
         media_urls = links_data['media_links']
         logger.debug(f"Extracted {len(media_urls)} media URLs")
 
+        # Create converter with appropriate extraction mode
+        request_converter = AIConverter(
+            api_key=settings.get_api_key(),
+            model=settings.get('default_model'),
+            extraction_mode=request.extraction_mode
+        )
+        logger.info(f"Using extraction mode: {request.extraction_mode}")
+
         # Step 4: Convert to markdown (with chunking if needed)
         job.update_progress(3, 4, 'Converting to markdown...')
         if not request.use_ai:
-            logger.info("AI disabled by user, using fallback")
+            logger.info("AI disabled by user, using Trafilatura/html2text fallback")
             log_ai_request(logger, "fallback", len(cleaned_html), {})
-            markdown = converter._convert_with_html2text(cleaned_html, request.title)
-            used_ai = False
-            error = "AI disabled by user"
+            markdown, used_ai, error = request_converter.convert_to_markdown(cleaned_html, request.title, "")
             log_ai_response(logger, "fallback", len(markdown), False, error)
         elif token_count > 20000:
             logger.warning(f"Large content ({token_count} tokens), using chunking")
@@ -198,7 +205,7 @@ async def process_html(request: ProcessHTMLRequest):
                 metadata_extra['custom_prompt'] = True
                 logger.info(f"Using custom prompt (length: {len(request.custom_prompt)} chars)")
             log_ai_request(logger, settings.get('default_model'), len(cleaned_html), metadata_extra)
-            markdown, used_ai, error = converter.convert_large_html(cleaned_html, request.title, request.custom_prompt)
+            markdown, used_ai, error = request_converter.convert_large_html(cleaned_html, request.title, request.custom_prompt)
             log_ai_response(logger, settings.get('default_model'), len(markdown), used_ai, error)
         else:
             metadata_extra = {}
@@ -206,7 +213,7 @@ async def process_html(request: ProcessHTMLRequest):
                 metadata_extra['custom_prompt'] = True
                 logger.info(f"Using custom prompt (length: {len(request.custom_prompt)} chars)")
             log_ai_request(logger, settings.get('default_model'), len(cleaned_html), metadata_extra)
-            markdown, used_ai, error = converter.convert_to_markdown(cleaned_html, request.title, request.custom_prompt)
+            markdown, used_ai, error = request_converter.convert_to_markdown(cleaned_html, request.title, request.custom_prompt)
             log_ai_response(logger, settings.get('default_model'), len(markdown), used_ai, error)
 
         # Step 5: Generate filename from title or URL
