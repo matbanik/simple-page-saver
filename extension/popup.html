@@ -229,6 +229,15 @@
     <h1>🗂️ Simple Page Saver</h1>
 
     <div class="section">
+        <div class="section-title">⚙️ Settings</div>
+        <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <input type="checkbox" id="enable-ai">
+            <span>Enable AI Processing (costs money)</span>
+        </label>
+        <div id="ai-status" style="font-size: 11px; color: #666; padding: 4px 8px; background: #f0f0f0; border-radius: 3px; display: none;"></div>
+    </div>
+
+    <div class="section">
         <div class="section-title">Current Page</div>
         <button id="extract-current" class="btn-primary">Extract Current Page</button>
     </div>

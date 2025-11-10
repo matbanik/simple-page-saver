@@ -41,6 +41,7 @@ class ProcessHTMLRequest(BaseModel):
     url: str
     html: str
     title: Optional[str] = ""
+    use_ai: Optional[bool] = True  # Default to True for backward compatibility
 
 
 class ProcessHTMLResponse(BaseModel):
@@ -108,7 +109,13 @@ async def process_html(request: ProcessHTMLRequest):
         media_urls = links_data['media_links']
 
         # Step 4: Convert to markdown (with chunking if needed)
-        if token_count > 20000:  # ~80K characters
+        # Force fallback if use_ai is False
+        if not request.use_ai:
+            print(f"[API] AI disabled by user, using fallback for: {request.url}")
+            markdown = converter._convert_with_html2text(cleaned_html, request.title)
+            used_ai = False
+            error = "AI disabled by user"
+        elif token_count > 20000:  # ~80K characters
             markdown, used_ai, error = converter.convert_large_html(cleaned_html, request.title)
         else:
             markdown, used_ai, error = converter.convert_to_markdown(cleaned_html, request.title)

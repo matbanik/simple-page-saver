@@ -273,11 +273,13 @@ async function extractPageData(tabId) {
 
 // Process HTML with backend
 async function processWithBackend(url, html, title) {
-    // Get API URL from chrome.storage (service workers can't use localStorage)
-    const storage = await chrome.storage.local.get(['apiEndpoint']);
+    // Get API URL and AI setting from chrome.storage
+    const storage = await chrome.storage.local.get(['apiEndpoint', 'enableAI']);
     const apiUrl = storage.apiEndpoint || API_BASE_URL;
+    const enableAI = storage.enableAI ?? false; // Default to false (use fallback)
 
     console.log('[Backend] Using API URL:', apiUrl);
+    console.log('[Backend] AI enabled:', enableAI);
     console.log('[Backend] Sending request to /process-html');
 
     const response = await fetch(`${apiUrl}/process-html`, {
@@ -285,7 +287,12 @@ async function processWithBackend(url, html, title) {
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ url, html, title })
+        body: JSON.stringify({
+            url,
+            html,
+            title,
+            use_ai: enableAI  // Pass AI preference to backend
+        })
     });
 
     console.log('[Backend] Response status:', response.status);

@@ -41,6 +41,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('test-ai').addEventListener('click', testAI);
     document.getElementById('test-fallback').addEventListener('click', testFallback);
 
+    // AI toggle listener
+    document.getElementById('enable-ai').addEventListener('change', handleAIToggle);
+
+    // Load AI enabled setting
+    await loadAISettings();
+
     console.log('[Popup] Initialization complete');
 });
 
@@ -284,6 +290,50 @@ function disableButtons(disabled) {
     document.getElementById('extract-current').disabled = disabled;
     document.getElementById('map-site').disabled = disabled;
     document.getElementById('extract-selected').disabled = disabled;
+}
+
+// Load AI settings
+async function loadAISettings() {
+    const storage = await chrome.storage.local.get(['enableAI']);
+    const enableAI = storage.enableAI ?? false; // Default to false (use fallback)
+
+    document.getElementById('enable-ai').checked = enableAI;
+    updateAIStatus(enableAI);
+
+    console.log('[Settings] AI enabled:', enableAI);
+}
+
+// Handle AI toggle
+async function handleAIToggle(event) {
+    const enableAI = event.target.checked;
+
+    await chrome.storage.local.set({ enableAI });
+    console.log('[Settings] AI toggled:', enableAI ? 'ON' : 'OFF');
+
+    updateAIStatus(enableAI);
+
+    if (enableAI) {
+        showStatus('⚠️ AI Processing Enabled - This will incur costs!', 'info');
+    } else {
+        showStatus('✓ Using Free Fallback (html2text)', 'success');
+    }
+}
+
+// Update AI status display
+function updateAIStatus(enableAI) {
+    const statusDiv = document.getElementById('ai-status');
+
+    if (enableAI) {
+        statusDiv.style.display = 'block';
+        statusDiv.style.background = '#fff3cd';
+        statusDiv.style.color = '#856404';
+        statusDiv.textContent = '⚠️ AI enabled - processing will cost money';
+    } else {
+        statusDiv.style.display = 'block';
+        statusDiv.style.background = '#d4edda';
+        statusDiv.style.color = '#155724';
+        statusDiv.textContent = '✓ Free fallback mode (html2text)';
+    }
 }
 
 // Toggle test buttons visibility
