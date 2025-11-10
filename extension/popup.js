@@ -44,8 +44,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     // AI toggle listener
     document.getElementById('enable-ai').addEventListener('change', handleAIToggle);
 
+    // Prompt preset listener
+    document.getElementById('prompt-presets').addEventListener('change', loadPromptPreset);
+
+    // Custom prompt change listener - save to storage
+    document.getElementById('custom-prompt').addEventListener('change', async (e) => {
+        await chrome.storage.local.set({ customPrompt: e.target.value });
+        console.log('[Prompt] Custom prompt saved');
+    });
+
     // Load AI enabled setting
     await loadAISettings();
+
+    // Load saved custom prompt
+    const storage = await chrome.storage.local.get(['customPrompt']);
+    if (storage.customPrompt) {
+        document.getElementById('custom-prompt').value = storage.customPrompt;
+    }
 
     console.log('[Popup] Initialization complete');
 });
@@ -322,17 +337,41 @@ async function handleAIToggle(event) {
 // Update AI status display
 function updateAIStatus(enableAI) {
     const statusDiv = document.getElementById('ai-status');
+    const promptSection = document.getElementById('ai-prompt-section');
 
     if (enableAI) {
         statusDiv.style.display = 'block';
         statusDiv.style.background = '#fff3cd';
         statusDiv.style.color = '#856404';
         statusDiv.textContent = '⚠️ AI enabled - processing will cost money';
+        promptSection.style.display = 'block';  // Show custom prompt section
     } else {
         statusDiv.style.display = 'block';
         statusDiv.style.background = '#d4edda';
         statusDiv.style.color = '#155724';
         statusDiv.textContent = '✓ Free fallback mode (html2text)';
+        promptSection.style.display = 'none';  // Hide custom prompt section
+    }
+}
+
+// Load prompt preset
+function loadPromptPreset() {
+    const preset = document.getElementById('prompt-presets').value;
+    const customPrompt = document.getElementById('custom-prompt');
+
+    const presets = {
+        'extract_products': 'Extract the following from this page and format as a markdown table:\n- Product Title\n- Price (if available)\n- Description\n- Key Features\n\nCreate a CSV-formatted table in your response.',
+        'highlight_keyword': 'Search for the keyword "[KEYWORD]" throughout the content. When you find it, create markdown highlights using **bold** formatting. List all occurrences with their context.',
+        'price_comparison': 'Find all products with prices on this page. Create a comparison table with columns: Product Name, Price, Features, Link. Sort by price from lowest to highest.',
+        'extract_reviews': 'Find and summarize all customer reviews on this page. Include:\n- Overall rating summary\n- Common positive feedback\n- Common negative feedback\n- Individual review highlights',
+        'contact_info': 'Extract all contact information from this page:\n- Phone numbers\n- Email addresses\n- Physical addresses\n- Social media links\n- Business hours (if available)\n\nFormat as a structured list.',
+        'specs_table': 'Find product specifications and create a detailed markdown table with two columns: Specification and Value. Include all technical details, dimensions, features, and requirements.',
+        'link_summary': 'List all important links and resources mentioned on this page. Categorize them as:\n- Internal Links\n- External Resources\n- Download Links\n- Documentation\n- Related Content\n\nInclude a brief description for each link.'
+    };
+
+    if (preset && presets[preset]) {
+        customPrompt.value = presets[preset];
+        console.log('[Prompt] Loaded preset:', preset);
     }
 }
 

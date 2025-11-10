@@ -277,13 +277,17 @@ async function extractPageData(tabId) {
 
 // Process HTML with backend
 async function processWithBackend(url, html, title) {
-    // Get API URL and AI setting from chrome.storage
-    const storage = await chrome.storage.local.get(['apiEndpoint', 'enableAI']);
+    // Get API URL, AI setting, and custom prompt from chrome.storage
+    const storage = await chrome.storage.local.get(['apiEndpoint', 'enableAI', 'customPrompt']);
     const apiUrl = storage.apiEndpoint || API_BASE_URL;
     const enableAI = storage.enableAI ?? false; // Default to false (use fallback)
+    const customPrompt = storage.customPrompt || '';
 
     console.log('[Backend] Using API URL:', apiUrl);
     console.log('[Backend] AI enabled:', enableAI);
+    if (customPrompt) {
+        console.log('[Backend] Custom prompt:', customPrompt.substring(0, 100) + '...');
+    }
     console.log('[Backend] Sending request to /process-html');
 
     const response = await fetch(`${apiUrl}/process-html`, {
@@ -295,7 +299,8 @@ async function processWithBackend(url, html, title) {
             url,
             html,
             title,
-            use_ai: enableAI  // Pass AI preference to backend
+            use_ai: enableAI,  // Pass AI preference to backend
+            custom_prompt: customPrompt  // Pass custom AI instructions
         })
     });
 
