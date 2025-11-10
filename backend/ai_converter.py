@@ -53,13 +53,14 @@ Guidelines:
         self.html2text_converter.body_width = 0  # Don't wrap lines
         self.html2text_converter.ignore_tables = False
 
-    def convert_to_markdown(self, html: str, title: str = "") -> Tuple[str, bool, Optional[str]]:
+    def convert_to_markdown(self, html: str, title: str = "", custom_prompt: str = "") -> Tuple[str, bool, Optional[str]]:
         """
         Convert HTML to Markdown using AI or fallback
 
         Args:
             html: Preprocessed HTML string
             title: Page title
+            custom_prompt: Optional custom instructions for AI processing
 
         Returns:
             Tuple of (markdown_content, used_ai, error_message)
@@ -67,7 +68,7 @@ Guidelines:
         # Try AI conversion first if API key is available
         if self.api_key:
             try:
-                markdown = self._convert_with_ai(html, title)
+                markdown = self._convert_with_ai(html, title, custom_prompt)
                 return markdown, True, None
             except Exception as e:
                 print(f"AI conversion failed: {e}. Falling back to html2text.")
@@ -79,16 +80,21 @@ Guidelines:
         markdown = self._convert_with_html2text(html, title)
         return markdown, False, error_msg
 
-    def _convert_with_ai(self, html: str, title: str) -> str:
+    def _convert_with_ai(self, html: str, title: str, custom_prompt: str = "") -> str:
         """Convert HTML to markdown using OpenRouter API"""
 
-        user_prompt = f"""Convert the following HTML to clean markdown.
+        # Build user prompt with custom instructions if provided
+        user_prompt_parts = ["Convert the following HTML to clean markdown."]
 
-{f'Page Title: {title}' if title else ''}
+        if custom_prompt:
+            user_prompt_parts.append(f"\nAdditional Instructions:\n{custom_prompt}")
 
-HTML:
-{html}
-"""
+        if title:
+            user_prompt_parts.append(f"\nPage Title: {title}")
+
+        user_prompt_parts.append(f"\nHTML:\n{html}")
+
+        user_prompt = "\n".join(user_prompt_parts)
 
         payload = {
             "model": self.model,
@@ -201,16 +207,21 @@ HTML:
 
         return chunks
 
-    def convert_large_html(self, html: str, title: str = "") -> Tuple[str, bool, Optional[str]]:
+    def convert_large_html(self, html: str, title: str = "", custom_prompt: str = "") -> Tuple[str, bool, Optional[str]]:
         """
         Convert large HTML by chunking if necessary
+
+        Args:
+            html: HTML string
+            title: Page title
+            custom_prompt: Optional custom instructions for AI processing
 
         Returns:
             Tuple of (markdown_content, used_ai, error_message)
         """
         # Check if chunking is needed (80K chars ≈ 20K tokens)
         if len(html) <= 80000:
-            return self.convert_to_markdown(html, title)
+            return self.convert_to_markdown(html, title, custom_prompt)
 
         chunks = self.chunk_html(html)
         markdown_parts = []
@@ -219,7 +230,7 @@ HTML:
 
         for i, chunk in enumerate(chunks):
             print(f"Processing chunk {i+1}/{len(chunks)}")
-            md, ai_used, error = self.convert_to_markdown(chunk, title if i == 0 else "")
+            md, ai_used, error = self.convert_to_markdown(chunk, title if i == 0 else "", custom_prompt)
             markdown_parts.append(md)
             used_ai = used_ai or ai_used
             if error:

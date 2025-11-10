@@ -1,0 +1,104 @@
+==============================================================================
+  SIMPLE PAGE SAVER - LAUNCHER QUICK REFERENCE
+==============================================================================
+
+BASIC USAGE
+-----------
+  SimplePageSaver.exe                    Start server (default)
+  SimplePageSaver.exe -gui               Launch management GUI
+  python launcher.py                     Start server (Python)
+  python launcher.py -gui                Launch GUI (Python)
+
+CONVENIENCE SCRIPTS
+-------------------
+  start_server.bat                       Double-click to start server
+  start_gui.bat                          Double-click to launch GUI
+
+COMMAND-LINE OPTIONS
+--------------------
+  -g, --gui                              Launch management GUI
+  -s, --server                           Start server (default, optional)
+  -p PORT, --port PORT                   Override server port
+  --log-level LEVEL                      Set log level (DEBUG/INFO/WARNING/ERROR/CRITICAL)
+  -h, --help                             Show full help message
+
+EXAMPLES
+--------
+  # Start server on default port (8077)
+  SimplePageSaver.exe
+
+  # Launch GUI to configure settings
+  SimplePageSaver.exe -gui
+
+  # Start server on custom port
+  SimplePageSaver.exe -p 8080
+  SimplePageSaver.exe --port 9000
+
+  # Start with debug logging
+  SimplePageSaver.exe --log-level DEBUG
+
+  # Combine options: custom port + debug
+  SimplePageSaver.exe -p 8080 --log-level DEBUG
+
+  # Show all options
+  SimplePageSaver.exe --help
+
+FIRST TIME SETUP
+----------------
+  1. Build executable:
+     cd backend
+     .\build.ps1
+
+  2. Launch GUI to configure:
+     SimplePageSaver.exe -gui
+
+  3. In GUI:
+     - Enter OpenRouter API key
+     - Select AI model
+     - Set log level (INFO recommended)
+     - Click "Save Settings"
+
+  4. Start server:
+     - Option A: Click "Start Server" in GUI
+     - Option B: Run "SimplePageSaver.exe" from command line
+     - Option C: Double-click "start_server.bat"
+
+CONFIGURATION
+-------------
+  Settings file: settings.json (created in same directory as .exe)
+  Log files:     logs/simple_page_saver_YYYYMMDD.log
+
+  Settings are encrypted and machine-specific.
+  API key is never stored in plain text.
+
+TROUBLESHOOTING
+---------------
+  Q: Executable won't start
+  A: First run is slow (extracting files). Wait 10-30 seconds.
+
+  Q: "Port already in use" error
+  A: Another instance is running. Use GUI to stop it, or:
+     - Find process: netstat -ano | findstr :8077
+     - Kill process: taskkill /PID <pid> /F
+
+  Q: Can't connect to server from extension
+  A: Check firewall, verify server is running:
+     SimplePageSaver.exe -gui
+     Click "Test Backend Health"
+
+  Q: Settings not saving
+  A: Run as administrator or check write permissions
+
+  Q: API key not working
+  A: Verify key at https://openrouter.ai/keys
+     Check key has credits
+
+MORE HELP
+---------
+  Full documentation: BACKEND_GUI_GUIDE.md
+  Extension guide:    README.md
+  Testing guide:      TESTING.md
+
+==============================================================================
+Version 2.0  |  Last Updated: 2025-01-10
+==============================================================================

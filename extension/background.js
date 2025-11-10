@@ -1,10 +1,14 @@
 // Background Service Worker for Simple Page Saver
 // Handles tab management, API communication, and file downloads
 
+// Import JSZip library for creating ZIP files
+importScripts('jszip.min.js');
+
 const API_BASE_URL = 'http://localhost:8077';
 const DELAY_AFTER_LOAD = 2000; // Wait 2 seconds after page load for dynamic content
 
 console.log('[Simple Page Saver] Background service worker loaded');
+console.log('[Simple Page Saver] JSZip available:', typeof JSZip !== 'undefined');
 
 // Message handler
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -273,13 +277,17 @@ async function extractPageData(tabId) {
 
 // Process HTML with backend
 async function processWithBackend(url, html, title) {
-    // Get API URL and AI setting from chrome.storage
-    const storage = await chrome.storage.local.get(['apiEndpoint', 'enableAI']);
+    // Get API URL, AI setting, and custom prompt from chrome.storage
+    const storage = await chrome.storage.local.get(['apiEndpoint', 'enableAI', 'customPrompt']);
     const apiUrl = storage.apiEndpoint || API_BASE_URL;
     const enableAI = storage.enableAI ?? false; // Default to false (use fallback)
+    const customPrompt = storage.customPrompt || '';
 
     console.log('[Backend] Using API URL:', apiUrl);
     console.log('[Backend] AI enabled:', enableAI);
+    if (customPrompt) {
+        console.log('[Backend] Custom prompt:', customPrompt.substring(0, 100) + '...');
+    }
     console.log('[Backend] Sending request to /process-html');
 
     const response = await fetch(`${apiUrl}/process-html`, {
@@ -291,7 +299,8 @@ async function processWithBackend(url, html, title) {
             url,
             html,
             title,
-            use_ai: enableAI  // Pass AI preference to backend
+            use_ai: enableAI,  // Pass AI preference to backend
+            custom_prompt: customPrompt  // Pass custom AI instructions
         })
     });
 
@@ -355,26 +364,63 @@ async function downloadFile(content, filename) {
 
 // Create and download ZIP file
 async function createAndDownloadZip(results, mediaUrls) {
-    // We'll use a simple ZIP creation approach
-    // For a more robust solution, consider using JSZip library
-    // For now, we'll download files individually with a prefix
+    console.log('[ZIP] Creating ZIP file with', results.length, 'pages');
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const prefix = `page_saver_${timestamp}_`;
+    try {
+        // Create new JSZip instance
+        const zip = new JSZip();
 
-    for (let i = 0; i < results.length; i++) {
-        const result = results[i];
-        const filename = `${prefix}${i + 1}_${result.filename}`;
-        await downloadFile(result.markdown, filename);
+        // Add each markdown file to the ZIP
+        for (let i = 0; i < results.length; i++) {
+            const result = results[i];
+            const filename = `${i + 1}_${result.filename}`;
+            console.log('[ZIP] Adding file:', filename);
+            zip.file(filename, result.markdown);
+        }
+
+        // Add media links file if there are any
+        if (mediaUrls.length > 0) {
+            const mediaContent = mediaUrls.join('\n');
+            console.log('[ZIP] Adding media_links.txt with', mediaUrls.length, 'URLs');
+            zip.file('media_links.txt', mediaContent);
+        }
+
+        // Generate ZIP file as blob
+        console.log('[ZIP] Generating ZIP archive...');
+        const blob = await zip.generateAsync({
+            type: 'blob',
+            compression: 'DEFLATE',
+            compressionOptions: { level: 6 }
+        });
+
+        console.log('[ZIP] ZIP created, size:', blob.size, 'bytes');
+
+        // Convert blob to data URL for download
+        const reader = new FileReader();
+        const dataUrl = await new Promise((resolve, reject) => {
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+
+        // Generate filename with timestamp
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const zipFilename = `page_saver_${timestamp}.zip`;
+
+        console.log('[ZIP] Downloading as:', zipFilename);
+
+        // Download the ZIP file
+        const downloadId = await chrome.downloads.download({
+            url: dataUrl,
+            filename: zipFilename,
+            saveAs: false
+        });
+
+        console.log('[ZIP] Download started, ID:', downloadId);
+    } catch (error) {
+        console.error('[ZIP] Error creating ZIP:', error);
+        throw new Error(`ZIP creation failed: ${error.message}`);
     }
-
-    // Download media links
-    if (mediaUrls.length > 0) {
-        const mediaContent = mediaUrls.join('\n');
-        await downloadFile(mediaContent, `${prefix}media_links.txt`);
-    }
-
-    console.log('Note: Files downloaded with prefix instead of ZIP (ZIP requires additional library)');
 }
 
 // Wait for tab to load
