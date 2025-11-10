@@ -4,50 +4,93 @@
 const API_BASE_URL = 'http://localhost:8077';
 const DELAY_AFTER_LOAD = 2000; // Wait 2 seconds after page load for dynamic content
 
+console.log('[Simple Page Saver] Background service worker loaded');
+
 // Message handler
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    console.log('[Simple Page Saver] Received message:', request.action);
+
     if (request.action === 'EXTRACT_SINGLE_PAGE') {
-        handleExtractSinglePage(request.url).then(sendResponse);
+        handleExtractSinglePage(request.url)
+            .then(response => {
+                console.log('[Simple Page Saver] Extract complete:', response);
+                sendResponse(response);
+            })
+            .catch(error => {
+                console.error('[Simple Page Saver] Extract failed:', error);
+                sendResponse({ success: false, error: error.message });
+            });
         return true; // Will respond asynchronously
     } else if (request.action === 'MAP_SITE') {
-        handleMapSite(request.url, request.depth).then(sendResponse);
+        handleMapSite(request.url, request.depth)
+            .then(response => {
+                console.log('[Simple Page Saver] Map complete:', response);
+                sendResponse(response);
+            })
+            .catch(error => {
+                console.error('[Simple Page Saver] Map failed:', error);
+                sendResponse({ success: false, error: error.message, urls: [] });
+            });
         return true;
     } else if (request.action === 'EXTRACT_MULTIPLE_PAGES') {
-        handleExtractMultiplePages(request.urls, request.outputZip).then(sendResponse);
+        handleExtractMultiplePages(request.urls, request.outputZip)
+            .then(response => {
+                console.log('[Simple Page Saver] Multi-extract complete:', response);
+                sendResponse(response);
+            })
+            .catch(error => {
+                console.error('[Simple Page Saver] Multi-extract failed:', error);
+                sendResponse({ success: false, error: error.message });
+            });
         return true;
     }
 });
 
 // Extract a single page
 async function handleExtractSinglePage(url) {
+    console.log('[Extract] Starting extraction for:', url);
+
     try {
         // Open the page in a new tab
+        console.log('[Extract] Creating new tab...');
         const tab = await chrome.tabs.create({ url, active: false });
+        console.log('[Extract] Tab created:', tab.id);
 
         // Wait for page to load
+        console.log('[Extract] Waiting for page to load...');
         await waitForTabLoad(tab.id);
+        console.log('[Extract] Page loaded');
 
         // Wait additional time for dynamic content
+        console.log('[Extract] Waiting for dynamic content...');
         await sleep(DELAY_AFTER_LOAD);
 
         // Extract HTML from the page
+        console.log('[Extract] Extracting HTML...');
         const pageData = await extractPageData(tab.id);
+        console.log('[Extract] HTML extracted, size:', pageData.html.length, 'chars');
 
         // Close the tab
+        console.log('[Extract] Closing tab...');
         await chrome.tabs.remove(tab.id);
 
         // Send to backend for processing
+        console.log('[Extract] Sending to backend...');
         const result = await processWithBackend(url, pageData.html, pageData.title);
+        console.log('[Extract] Backend response received:', result.filename);
 
         // Download the markdown file
+        console.log('[Extract] Downloading markdown file...');
         await downloadFile(result.markdown, result.filename);
 
         // If there are media links, create media_links.txt
         if (result.media_urls && result.media_urls.length > 0) {
+            console.log('[Extract] Downloading media links file...');
             const mediaContent = result.media_urls.join('\n');
             await downloadFile(mediaContent, 'media_links.txt');
         }
 
+        console.log('[Extract] Success!');
         return {
             success: true,
             filename: result.filename,
@@ -55,7 +98,7 @@ async function handleExtractSinglePage(url) {
             usedAI: result.used_ai
         };
     } catch (error) {
-        console.error('Extract single page error:', error);
+        console.error('[Extract] Error:', error);
         return {
             success: false,
             error: error.message
@@ -230,7 +273,12 @@ async function extractPageData(tabId) {
 
 // Process HTML with backend
 async function processWithBackend(url, html, title) {
-    const apiUrl = localStorage.getItem('apiEndpoint') || API_BASE_URL;
+    // Get API URL from chrome.storage (service workers can't use localStorage)
+    const storage = await chrome.storage.local.get(['apiEndpoint']);
+    const apiUrl = storage.apiEndpoint || API_BASE_URL;
+
+    console.log('[Backend] Using API URL:', apiUrl);
+    console.log('[Backend] Sending request to /process-html');
 
     const response = await fetch(`${apiUrl}/process-html`, {
         method: 'POST',
@@ -240,7 +288,11 @@ async function processWithBackend(url, html, title) {
         body: JSON.stringify({ url, html, title })
     });
 
+    console.log('[Backend] Response status:', response.status);
+
     if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[Backend] Error response:', errorText);
         throw new Error(`Backend error: ${response.status} ${response.statusText}`);
     }
 
@@ -249,7 +301,11 @@ async function processWithBackend(url, html, title) {
 
 // Extract links using backend
 async function extractLinks(html, baseUrl) {
-    const apiUrl = localStorage.getItem('apiEndpoint') || API_BASE_URL;
+    // Get API URL from chrome.storage (service workers can't use localStorage)
+    const storage = await chrome.storage.local.get(['apiEndpoint']);
+    const apiUrl = storage.apiEndpoint || API_BASE_URL;
+
+    console.log('[Backend] Extracting links from:', baseUrl);
 
     const response = await fetch(`${apiUrl}/extract-links`, {
         method: 'POST',
@@ -260,6 +316,8 @@ async function extractLinks(html, baseUrl) {
     });
 
     if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[Backend] Link extraction error:', errorText);
         throw new Error(`Backend error: ${response.status}`);
     }
 

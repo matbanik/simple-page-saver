@@ -3,11 +3,16 @@
 let discoveredUrls = [];
 let currentTab = null;
 
+console.log('[Popup] Script loaded');
+
 // Initialize popup
 document.addEventListener('DOMContentLoaded', async () => {
+    console.log('[Popup] DOM loaded, initializing...');
+
     // Get current tab
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     currentTab = tabs[0];
+    console.log('[Popup] Current tab:', currentTab?.url);
 
     // Set up event listeners
     document.getElementById('extract-current').addEventListener('click', extractCurrentPage);
@@ -29,11 +34,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             updateProgress(message.current, message.total, message.status);
         }
     });
+
+    console.log('[Popup] Initialization complete');
 });
 
 // Extract current page
 async function extractCurrentPage() {
+    console.log('[Popup] Extract button clicked');
+
     try {
+        console.log('[Popup] Sending message to background worker...');
         showStatus('Extracting current page...', 'info');
         disableButtons(true);
 
@@ -43,12 +53,17 @@ async function extractCurrentPage() {
             url: currentTab.url
         });
 
-        if (response.success) {
+        console.log('[Popup] Response received:', response);
+
+        if (response && response.success) {
             showStatus(`✓ Page saved: ${response.filename}`, 'success');
         } else {
-            showStatus(`Error: ${response.error}`, 'error');
+            const errorMsg = response?.error || 'Unknown error';
+            console.error('[Popup] Extraction failed:', errorMsg);
+            showStatus(`Error: ${errorMsg}`, 'error');
         }
     } catch (error) {
+        console.error('[Popup] Exception:', error);
         showStatus(`Error: ${error.message}`, 'error');
     } finally {
         disableButtons(false);
@@ -199,14 +214,20 @@ async function extractSelectedPages() {
 }
 
 // Show settings dialog
-function showSettings(e) {
+async function showSettings(e) {
     e.preventDefault();
-    const currentEndpoint = localStorage.getItem('apiEndpoint') || 'http://localhost:8077';
+
+    // Get current setting from chrome.storage
+    const storage = await chrome.storage.local.get(['apiEndpoint']);
+    const currentEndpoint = storage.apiEndpoint || 'http://localhost:8077';
+
     const newEndpoint = prompt('Enter API endpoint URL:', currentEndpoint);
 
     if (newEndpoint && newEndpoint !== currentEndpoint) {
-        localStorage.setItem('apiEndpoint', newEndpoint);
+        // Save to chrome.storage (works in both popup and service worker)
+        await chrome.storage.local.set({ apiEndpoint: newEndpoint });
         showStatus('API endpoint updated', 'success');
+        console.log('[Popup] API endpoint set to:', newEndpoint);
     }
 }
 
