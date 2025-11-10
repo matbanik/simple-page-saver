@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Page Saver</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            width: 450px;
+            min-height: 300px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            font-size: 13px;
+            padding: 16px;
+            background: #f5f5f5;
+        }
+
+        h1 {
+            font-size: 18px;
+            margin-bottom: 16px;
+            color: #333;
+        }
+
+        .section {
+            background: white;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 12px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .section-title {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #555;
+            font-size: 13px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+            align-items: center;
+        }
+
+        label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        input[type="checkbox"] {
+            cursor: pointer;
+        }
+
+        select, input[type="number"] {
+            padding: 6px 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        .btn-primary {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #45a049;
+        }
+
+        .btn-primary:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #2196F3;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #0b7dda;
+        }
+
+        .btn-secondary:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        #status {
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-top: 8px;
+            display: none;
+        }
+
+        #status.show {
+            display: block;
+        }
+
+        #status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        #status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        #status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        #progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 8px;
+            display: none;
+        }
+
+        #progress-bar.show {
+            display: block;
+        }
+
+        #progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #45a049);
+            width: 0%;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        #url-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            padding: 8px;
+            margin-top: 8px;
+            display: none;
+        }
+
+        #url-list.show {
+            display: block;
+        }
+
+        .url-item {
+            display: flex;
+            align-items: center;
+            padding: 6px;
+            margin-bottom: 4px;
+            background: #f9f9f9;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+
+        .url-item input[type="checkbox"] {
+            margin-right: 8px;
+        }
+
+        .url-item span {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        #search-box {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+
+        .link-type-filters {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .settings-link {
+            font-size: 11px;
+            color: #666;
+            text-decoration: none;
+            display: block;
+            margin-top: 8px;
+        }
+
+        .settings-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <h1>🗂️ Simple Page Saver</h1>
+
+    <div class="section">
+        <div class="section-title">Current Page</div>
+        <button id="extract-current" class="btn-primary">Extract Current Page</button>
+    </div>
+
+    <div class="section">
+        <div class="section-title">Site Mapping</div>
+        <div class="controls">
+            <label for="depth-select">Depth:</label>
+            <select id="depth-select">
+                <option value="0">0 (Current page only)</option>
+                <option value="1">1 (+ Direct links)</option>
+                <option value="2">2 (Two levels deep)</option>
+                <option value="3">3 (Three levels deep)</option>
+            </select>
+            <button id="map-site" class="btn-secondary">Map Site</button>
+        </div>
+
+        <div class="link-type-filters" id="link-filters" style="display: none;">
+            <label>
+                <input type="checkbox" id="filter-internal" checked>
+                Internal
+            </label>
+            <label>
+                <input type="checkbox" id="filter-external">
+                External
+            </label>
+            <label>
+                <input type="checkbox" id="filter-media">
+                Media
+            </label>
+        </div>
+
+        <input type="text" id="search-box" placeholder="Search URLs..." style="display: none;">
+
+        <div id="url-list"></div>
+
+        <div style="margin-top: 8px; display: none;" id="extraction-controls">
+            <label>
+                <input type="checkbox" id="output-zip" checked>
+                Download as ZIP
+            </label>
+            <button id="extract-selected" class="btn-primary" style="margin-top: 8px; width: 100%;">
+                Extract Selected Pages
+            </button>
+        </div>
+    </div>
+
+    <div id="progress-bar">
+        <div id="progress-fill">0%</div>
+    </div>
+
+    <div id="status"></div>
+
+    <a href="#" id="settings-link" class="settings-link">⚙️ Configure API Endpoint</a>
+
+    <script src="popup.js"></script>
+</body>
+</html>
