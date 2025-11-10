@@ -14,7 +14,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentTab = tabs[0];
     console.log('[Popup] Current tab:', currentTab?.url);
 
+    // Check connection state
+    updateConnectionStatus();
+
+    // Load and display jobs
+    loadJobs();
+
     // Set up event listeners
+    document.getElementById('refresh-jobs').addEventListener('click', loadJobs);
     document.getElementById('extract-current').addEventListener('click', extractCurrentPage);
     document.getElementById('map-site').addEventListener('click', mapSite);
     document.getElementById('extract-selected').addEventListener('click', extractSelectedPages);
@@ -56,6 +63,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load AI enabled setting
     await loadAISettings();
 
+    // Load extraction mode setting
+    await loadExtractionMode();
+
+    // Save extraction mode on change
+    document.getElementById('extraction-mode').addEventListener('change', async (e) => {
+        await chrome.storage.local.set({ extractionMode: e.target.value });
+        console.log('[Settings] Extraction mode saved:', e.target.value);
+    });
+
     // Load saved custom prompt
     const storage = await chrome.storage.local.get(['customPrompt']);
     const customPromptTextarea = document.getElementById('custom-prompt');
@@ -74,6 +90,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     console.log('[Popup] Initialization complete');
+
+    // Update connection status periodically
+    setInterval(updateConnectionStatus, 10000); // Every 10 seconds
+
+    // Refresh jobs periodically
+    setInterval(loadJobs, 5000); // Every 5 seconds
 });
 
 // Extract current page
@@ -85,14 +107,29 @@ async function extractCurrentPage() {
         showStatus('Extracting current page...', 'info');
         disableButtons(true);
 
-        // Check if ZIP option is selected
+        // Get download options
+        const downloadContent = document.getElementById('download-content').checked;
+        const downloadMediaLinks = document.getElementById('download-media-links').checked;
+        const downloadExternalLinks = document.getElementById('download-external-links').checked;
         const useZip = document.getElementById('single-page-zip').checked;
+
+        // Validate at least one option selected
+        if (!downloadContent && !downloadMediaLinks && !downloadExternalLinks) {
+            showStatus('Please select at least one download option', 'error');
+            disableButtons(false);
+            return;
+        }
 
         // Send message to background worker
         const response = await chrome.runtime.sendMessage({
             action: 'EXTRACT_SINGLE_PAGE',
             url: currentTab.url,
-            outputZip: useZip
+            outputZip: useZip,
+            downloadOptions: {
+                content: downloadContent,
+                mediaLinks: downloadMediaLinks,
+                externalLinks: downloadExternalLinks
+            }
         });
 
         console.log('[Popup] Response received:', response);
@@ -335,6 +372,16 @@ async function loadAISettings() {
     console.log('[Settings] AI enabled:', enableAI);
 }
 
+// Load extraction mode settings
+async function loadExtractionMode() {
+    const storage = await chrome.storage.local.get(['extractionMode']);
+    const extractionMode = storage.extractionMode || 'balanced'; // Default to balanced
+
+    document.getElementById('extraction-mode').value = extractionMode;
+
+    console.log('[Settings] Extraction mode:', extractionMode);
+}
+
 // Handle AI toggle
 async function handleAIToggle(event) {
     const enableAI = event.target.checked;
@@ -553,4 +600,170 @@ async function testFallback() {
         console.error('[Test] Fallback test failed:', error);
         showStatus(`✗ Fallback Test Error: ${error.message}`, 'error');
     }
+}
+
+// Update connection status indicator
+async function updateConnectionStatus() {
+    try {
+        const response = await chrome.runtime.sendMessage({ action: 'GET_CONNECTION_STATE' });
+
+        if (response && response.success) {
+            const state = response.state;
+            const statusDiv = document.getElementById('connection-status');
+            const statusText = document.getElementById('connection-text');
+            const statusDot = statusDiv.querySelector('.status-dot');
+
+            if (state.isConnected) {
+                statusDiv.className = 'connected';
+                statusDot.className = 'status-dot green';
+
+                let text = '✓ Backend connected';
+                if (state.aiEnabled) {
+                    text += ' (AI enabled)';
+                } else {
+                    text += ' (Fallback mode)';
+                }
+
+                // Show time since last ping
+                if (state.lastSuccessfulPing) {
+                    const secondsAgo = Math.floor((Date.now() - state.lastSuccessfulPing) / 1000);
+                    if (secondsAgo < 60) {
+                        text += ` • ${secondsAgo}s ago`;
+                    }
+                }
+
+                statusText.textContent = text;
+            } else {
+                statusDiv.className = 'disconnected';
+                statusDot.className = 'status-dot red';
+
+                let text = '✗ Backend disconnected';
+                if (state.consecutiveFailures > 0) {
+                    text += ` (${state.consecutiveFailures} failures)`;
+                }
+
+                statusText.textContent = text;
+            }
+        }
+    } catch (error) {
+        console.warn('[Popup] Could not get connection state:', error);
+    }
+}
+
+// Load and display jobs from backend
+async function loadJobs() {
+    try {
+        const storage = await chrome.storage.local.get(['apiEndpoint']);
+        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+
+        const response = await fetch(`${apiUrl}/jobs?limit=20`);
+        if (!response.ok) {
+            console.warn('[Jobs] Failed to load jobs:', response.status);
+            return;
+        }
+
+        const data = await response.json();
+        displayJobs(data.jobs);
+    } catch (error) {
+        console.warn('[Jobs] Error loading jobs:', error);
+    }
+}
+
+// Display jobs in the UI
+function displayJobs(jobs) {
+    const jobsList = document.getElementById('jobs-list');
+    const jobsSection = document.getElementById('jobs-section');
+
+    // Filter for active or recent jobs
+    const relevantJobs = jobs.filter(job =>
+        job.status === 'processing' ||
+        job.status === 'pending' ||
+        (job.status === 'completed' && isRecent(job.completed_at)) ||
+        (job.status === 'failed' && isRecent(job.completed_at))
+    );
+
+    if (relevantJobs.length === 0) {
+        jobsSection.style.display = 'none';
+        return;
+    }
+
+    jobsSection.style.display = 'block';
+    jobsList.innerHTML = '';
+
+    relevantJobs.forEach(job => {
+        const jobItem = createJobElement(job);
+        jobsList.appendChild(jobItem);
+    });
+}
+
+// Create job element
+function createJobElement(job) {
+    const div = document.createElement('div');
+    div.className = `job-item ${job.status}`;
+    div.dataset.jobId = job.id;
+
+    const title = job.params.title || job.params.url || 'Unknown';
+    const statusText = job.status.charAt(0).toUpperCase() + job.status.slice(1);
+    const progress = job.progress || { current: 0, total: 0, message: '', percent: 0 };
+
+    div.innerHTML = `
+        <div class="job-header">
+            <div class="job-title" title="${title}">${truncate(title, 40)}</div>
+            <div class="job-status ${job.status}">${statusText}</div>
+        </div>
+        ${progress.message ? `<div class="job-progress">${progress.message}</div>` : ''}
+        ${job.status === 'processing' || job.status === 'pending' ? `
+            <div class="job-progress-bar">
+                <div class="job-progress-fill" style="width: ${progress.percent || 0}%"></div>
+            </div>
+        ` : ''}
+        <div class="job-time">${getTimeAgo(job.created_at)}</div>
+    `;
+
+    div.addEventListener('click', () => handleJobClick(job));
+
+    return div;
+}
+
+// Handle clicking on a job
+async function handleJobClick(job) {
+    console.log('[Jobs] Clicked job:', job.id);
+
+    // For completed jobs, show result details
+    if (job.status === 'completed' && job.result) {
+        showStatus(`Job completed: ${job.result.filename} (${job.result.word_count} words)`, 'success');
+    } else if (job.status === 'failed') {
+        showStatus(`Job failed: ${job.error}`, 'error');
+    } else if (job.status === 'processing') {
+        const progress = job.progress || {};
+        showStatus(`Job in progress: ${progress.message || 'Processing...'}`, 'info');
+    }
+
+    // TODO: Restore job context (for multi-page jobs)
+    // This could restore the URL list for site mapping, etc.
+}
+
+// Helper: Check if timestamp is recent (within last hour)
+function isRecent(timestamp) {
+    if (!timestamp) return false;
+    const time = new Date(timestamp);
+    const now = new Date();
+    return (now - time) < 3600000; // 1 hour in milliseconds
+}
+
+// Helper: Get time ago string
+function getTimeAgo(timestamp) {
+    const time = new Date(timestamp);
+    const now = new Date();
+    const seconds = Math.floor((now - time) / 1000);
+
+    if (seconds < 60) return `${seconds}s ago`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    return `${Math.floor(seconds / 3600)}h ago`;
+}
+
+// Helper: Truncate string
+function truncate(str, maxLength) {
+    if (str.length <= maxLength) return str;
+    return str.substring(0, maxLength - 3) + '...';
 }

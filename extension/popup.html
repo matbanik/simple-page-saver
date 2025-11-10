@@ -223,10 +223,181 @@
         .settings-link:hover {
             text-decoration: underline;
         }
+
+        #connection-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            padding: 6px 10px;
+            background: #f9f9f9;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            border: 1px solid #e0e0e0;
+        }
+
+        #connection-status.connected {
+            background: #e8f5e9;
+            border-color: #4CAF50;
+            color: #2e7d32;
+        }
+
+        #connection-status.disconnected {
+            background: #ffebee;
+            border-color: #f44336;
+            color: #c62828;
+        }
+
+        #connection-status.checking {
+            background: #fff3e0;
+            border-color: #ff9800;
+            color: #e65100;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-dot.green {
+            background: #4CAF50;
+        }
+
+        .status-dot.red {
+            background: #f44336;
+        }
+
+        .status-dot.orange {
+            background: #ff9800;
+        }
+
+        /* Job List Styles */
+        #jobs-list {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 8px;
+        }
+
+        .job-item {
+            padding: 8px;
+            margin-bottom: 6px;
+            background: #f9f9f9;
+            border-radius: 4px;
+            border-left: 3px solid #ccc;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .job-item:hover {
+            background: #f0f0f0;
+        }
+
+        .job-item.processing {
+            border-left-color: #2196F3;
+        }
+
+        .job-item.completed {
+            border-left-color: #4CAF50;
+        }
+
+        .job-item.failed {
+            border-left-color: #f44336;
+        }
+
+        .job-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .job-title {
+            font-size: 12px;
+            font-weight: 500;
+            color: #333;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+        }
+
+        .job-status {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: #e0e0e0;
+            color: #666;
+            margin-left: 8px;
+        }
+
+        .job-status.processing {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .job-status.completed {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .job-status.failed {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .job-progress {
+            font-size: 11px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .job-progress-bar {
+            height: 4px;
+            background: #e0e0e0;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+
+        .job-progress-fill {
+            height: 100%;
+            background: #2196F3;
+            transition: width 0.3s;
+        }
+
+        .job-time {
+            font-size: 10px;
+            color: #999;
+            margin-top: 2px;
+        }
+
+        .no-jobs {
+            text-align: center;
+            color: #999;
+            font-size: 11px;
+            padding: 12px;
+        }
     </style>
 </head>
 <body>
     <h1>🗂️ Simple Page Saver</h1>
+
+    <!-- Connection Status Indicator -->
+    <div id="connection-status" class="checking">
+        <span class="status-dot orange"></span>
+        <span id="connection-text">Checking backend...</span>
+    </div>
+
+    <!-- Active Jobs Section -->
+    <div id="jobs-section" class="section" style="display: none;">
+        <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>📋 Active Jobs</span>
+            <button id="refresh-jobs" style="padding: 2px 8px; font-size: 11px; background: #e0e0e0; border: none; border-radius: 3px; cursor: pointer;">Refresh</button>
+        </div>
+        <div id="jobs-list"></div>
+    </div>
 
     <div class="section">
         <div class="section-title">⚙️ Settings</div>
@@ -235,6 +406,21 @@
             <span>Enable AI Processing (costs money)</span>
         </label>
         <div id="ai-status" style="font-size: 11px; color: #666; padding: 4px 8px; background: #f0f0f0; border-radius: 3px; display: none;"></div>
+
+        <div style="margin-top: 12px;">
+            <label style="font-size: 12px; font-weight: 500; display: block; margin-bottom: 4px;">
+                Fallback Extraction Mode:
+                <span style="font-size: 10px; color: #999; font-weight: normal;">(when AI is disabled)</span>
+            </label>
+            <select id="extraction-mode" style="width: 100%; padding: 6px; font-size: 12px; margin-bottom: 4px;">
+                <option value="balanced">Balanced - Standard extraction</option>
+                <option value="recall">Recall - Capture more content (less filtering)</option>
+                <option value="precision">Precision - Cleaner output (more filtering)</option>
+            </select>
+            <div style="font-size: 10px; color: #666; padding: 4px; background: #f9f9f9; border-radius: 3px;">
+                Uses Trafilatura for intelligent content extraction without AI
+            </div>
+        </div>
 
         <div id="ai-prompt-section" style="display: none; margin-top: 12px;">
             <label style="font-size: 12px; font-weight: 500; display: block; margin-bottom: 4px;">Custom AI Instructions:</label>
@@ -258,9 +444,21 @@
     <div class="section">
         <div class="section-title">Current Page</div>
         <div style="margin-bottom: 8px;">
-            <label>
+            <label style="display: block; margin-bottom: 4px;">
+                <input type="checkbox" id="download-content" checked>
+                <span>Download page content (markdown)</span>
+            </label>
+            <label style="display: block; margin-bottom: 4px;">
+                <input type="checkbox" id="download-media-links">
+                <span>Download media links (images, videos, etc.)</span>
+            </label>
+            <label style="display: block; margin-bottom: 4px;">
+                <input type="checkbox" id="download-external-links">
+                <span>Download external links</span>
+            </label>
+            <label style="display: block; margin-bottom: 8px;">
                 <input type="checkbox" id="single-page-zip">
-                <span>Download as ZIP (includes media links)</span>
+                <span>Package as ZIP file</span>
             </label>
         </div>
         <button id="extract-current" class="btn-primary">Extract Current Page</button>

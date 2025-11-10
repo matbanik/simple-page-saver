@@ -1,11 +1,13 @@
 """
 AI Converter using OpenRouter API
 Converts preprocessed HTML to clean markdown
+Falls back to Trafilatura (intelligent extraction) or html2text
 """
 
 import os
 import time
 import html2text
+import trafilatura
 from typing import Optional, Tuple
 import requests
 from dotenv import load_dotenv
@@ -39,13 +41,14 @@ Guidelines:
 - Output ONLY pure markdown with no explanations or commentary
 - Do not add any introductory or concluding statements"""
 
-    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, extraction_mode: str = 'balanced'):
         self.api_key = api_key or os.getenv('OPENROUTER_API_KEY')
         self.model = model or os.getenv('DEFAULT_MODEL', 'deepseek/deepseek-chat')
         self.max_tokens = int(os.getenv('MAX_TOKENS', '32000'))
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
+        self.extraction_mode = extraction_mode  # 'balanced', 'recall', 'precision'
 
-        # Fallback converter (html2text) for when API is unavailable
+        # Fallback converter (html2text) for when both AI and Trafilatura fail
         self.html2text_converter = html2text.HTML2Text()
         self.html2text_converter.ignore_links = False
         self.html2text_converter.ignore_images = False
@@ -55,7 +58,8 @@ Guidelines:
 
     def convert_to_markdown(self, html: str, title: str = "", custom_prompt: str = "") -> Tuple[str, bool, Optional[str]]:
         """
-        Convert HTML to Markdown using AI or fallback
+        Convert HTML to Markdown using AI or fallback chain
+        Fallback order: AI → Trafilatura → html2text
 
         Args:
             html: Preprocessed HTML string
@@ -71,12 +75,23 @@ Guidelines:
                 markdown = self._convert_with_ai(html, title, custom_prompt)
                 return markdown, True, None
             except Exception as e:
-                print(f"AI conversion failed: {e}. Falling back to html2text.")
+                print(f"AI conversion failed: {e}. Falling back to Trafilatura.")
                 error_msg = str(e)
         else:
             error_msg = "No API key provided"
 
-        # Fallback to html2text
+        # Try Trafilatura extraction
+        try:
+            markdown = self._convert_with_trafilatura(html, title)
+            if markdown and len(markdown.strip()) > 50:  # Ensure meaningful content
+                print(f"Using Trafilatura extraction (mode: {self.extraction_mode})")
+                return markdown, False, error_msg
+            else:
+                print("Trafilatura extraction returned insufficient content, falling back to html2text")
+        except Exception as e:
+            print(f"Trafilatura failed: {e}. Falling back to html2text.")
+
+        # Final fallback to html2text
         markdown = self._convert_with_html2text(html, title)
         return markdown, False, error_msg
 
@@ -175,8 +190,43 @@ Guidelines:
 
         raise Exception("Failed to convert after all retries")
 
+    def _convert_with_trafilatura(self, html: str, title: str) -> str:
+        """
+        Intelligent content extraction using Trafilatura
+        Supports three extraction modes: balanced, recall, precision
+        """
+        # Configure extraction based on mode
+        favor_recall = self.extraction_mode == 'recall'
+        favor_precision = self.extraction_mode == 'precision'
+
+        print(f"[Trafilatura] Extracting with mode: {self.extraction_mode}")
+        print(f"  favor_recall={favor_recall}, favor_precision={favor_precision}")
+
+        # Extract text content using Trafilatura
+        text = trafilatura.extract(
+            html,
+            include_comments=False,
+            include_tables=True,  # Include tables for better data preservation
+            include_images=True,  # Include image references
+            include_links=True,   # Preserve links
+            favor_recall=favor_recall,
+            favor_precision=favor_precision,
+            output_format='markdown'  # Direct markdown output
+        )
+
+        if not text:
+            raise ValueError("Trafilatura extraction returned no content")
+
+        # Add title if provided and not already present
+        if title and not text.startswith(f"# {title}"):
+            text = f"# {title}\n\n{text}"
+
+        print(f"[Trafilatura] Extracted {len(text)} characters")
+        return text.strip()
+
     def _convert_with_html2text(self, html: str, title: str) -> str:
-        """Fallback conversion using html2text library"""
+        """Final fallback conversion using html2text library"""
+        print("[html2text] Using basic html2text conversion")
         markdown = self.html2text_converter.handle(html)
 
         # Add title if provided
