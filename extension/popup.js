@@ -74,10 +74,14 @@ async function extractCurrentPage() {
         showStatus('Extracting current page...', 'info');
         disableButtons(true);
 
+        // Check if ZIP option is selected
+        const useZip = document.getElementById('single-page-zip').checked;
+
         // Send message to background worker
         const response = await chrome.runtime.sendMessage({
             action: 'EXTRACT_SINGLE_PAGE',
-            url: currentTab.url
+            url: currentTab.url,
+            outputZip: useZip
         });
 
         console.log('[Popup] Response received:', response);
