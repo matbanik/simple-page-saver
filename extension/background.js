@@ -326,17 +326,24 @@ async function extractLinks(html, baseUrl) {
 
 // Download file
 async function downloadFile(content, filename) {
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
+    console.log('[Download] Creating download for:', filename);
 
-    await chrome.downloads.download({
-        url,
-        filename,
-        saveAs: false
-    });
+    // Convert content to data URL (works in service workers, unlike URL.createObjectURL)
+    const base64Content = btoa(unescape(encodeURIComponent(content)));
+    const dataUrl = `data:text/plain;base64,${base64Content}`;
 
-    // Clean up
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    try {
+        const downloadId = await chrome.downloads.download({
+            url: dataUrl,
+            filename: filename,
+            saveAs: false
+        });
+
+        console.log('[Download] Download started, ID:', downloadId);
+    } catch (error) {
+        console.error('[Download] Download failed:', error);
+        throw new Error(`Download failed: ${error.message}`);
+    }
 }
 
 // Create and download ZIP file
