@@ -9,6 +9,18 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 from threading import Lock
 import json
+import os
+
+# Import diagnostics if available (won't crash if not present)
+try:
+    ENABLE_DIAGNOSTICS = os.getenv('ENABLE_DIAGNOSTICS', 'false').lower() == 'true'
+    if ENABLE_DIAGNOSTICS:
+        from diagnostics import diagnostic_monitor
+    else:
+        diagnostic_monitor = None
+except ImportError:
+    diagnostic_monitor = None
+    ENABLE_DIAGNOSTICS = False
 
 
 class Job:
@@ -90,9 +102,25 @@ class JobManager:
         self.max_jobs = max_jobs
         self.ttl_hours = ttl_hours
 
+    def _acquire_lock(self, operation: str):
+        """Acquire lock with diagnostic logging"""
+        if diagnostic_monitor:
+            diagnostic_monitor.log_lock_acquire('JobManager.lock', operation)
+        self.lock.acquire()
+        if diagnostic_monitor:
+            diagnostic_monitor.log_lock_acquired('JobManager.lock', operation)
+
+    def _release_lock(self, operation: str):
+        """Release lock with diagnostic logging"""
+        self.lock.release()
+        if diagnostic_monitor:
+            diagnostic_monitor.log_lock_release('JobManager.lock', operation)
+
     def create_job(self, job_type: str, params: dict) -> Job:
         """Create a new job"""
-        with self.lock:
+        operation = f"create_job({job_type})"
+        try:
+            self._acquire_lock(operation)
             job = Job(job_type, params)
             self.jobs[job.id] = job
 
@@ -100,36 +128,56 @@ class JobManager:
             self._cleanup_old_jobs()
 
             return job
+        finally:
+            self._release_lock(operation)
 
     def get_job(self, job_id: str) -> Optional[Job]:
         """Get a job by ID"""
-        with self.lock:
+        operation = f"get_job({job_id})"
+        try:
+            self._acquire_lock(operation)
             return self.jobs.get(job_id)
+        finally:
+            self._release_lock(operation)
 
     def update_job_progress(self, job_id: str, current: int, total: int, message: str = ''):
         """Update job progress"""
-        with self.lock:
+        operation = f"update_job_progress({job_id})"
+        try:
+            self._acquire_lock(operation)
             job = self.jobs.get(job_id)
             if job:
                 job.update_progress(current, total, message)
+        finally:
+            self._release_lock(operation)
 
     def complete_job(self, job_id: str, result: Any):
         """Mark job as completed"""
-        with self.lock:
+        operation = f"complete_job({job_id})"
+        try:
+            self._acquire_lock(operation)
             job = self.jobs.get(job_id)
             if job:
                 job.complete(result)
+        finally:
+            self._release_lock(operation)
 
     def fail_job(self, job_id: str, error: str):
         """Mark job as failed"""
-        with self.lock:
+        operation = f"fail_job({job_id})"
+        try:
+            self._acquire_lock(operation)
             job = self.jobs.get(job_id)
             if job:
                 job.fail(error)
+        finally:
+            self._release_lock(operation)
 
     def list_jobs(self, status: Optional[str] = None, limit: int = 50) -> List[dict]:
         """List all jobs, optionally filtered by status"""
-        with self.lock:
+        operation = f"list_jobs(status={status})"
+        try:
+            self._acquire_lock(operation)
             jobs = list(self.jobs.values())
 
             # Filter by status if specified
@@ -143,6 +191,8 @@ class JobManager:
             jobs = jobs[:limit]
 
             return [job.to_dict() for job in jobs]
+        finally:
+            self._release_lock(operation)
 
     def get_active_jobs(self) -> List[dict]:
         """Get all active (pending or processing) jobs"""
@@ -150,11 +200,15 @@ class JobManager:
 
     def delete_job(self, job_id: str) -> bool:
         """Delete a job"""
-        with self.lock:
+        operation = f"delete_job({job_id})"
+        try:
+            self._acquire_lock(operation)
             if job_id in self.jobs:
                 del self.jobs[job_id]
                 return True
             return False
+        finally:
+            self._release_lock(operation)
 
     def _cleanup_old_jobs(self):
         """Remove old completed/failed jobs to prevent memory bloat"""

@@ -16,6 +16,20 @@ from settings_manager import SettingsManager
 from logging_config import setup_logging, log_ai_request, log_ai_response
 from job_manager import JobManager, Job
 
+# Import diagnostics if enabled
+try:
+    ENABLE_DIAGNOSTICS = os.getenv('ENABLE_DIAGNOSTICS', 'false').lower() == 'true'
+    if ENABLE_DIAGNOSTICS:
+        from diagnostics import diagnostic_monitor, track_request
+        logger = None  # Will be set after setup
+    else:
+        diagnostic_monitor = None
+        track_request = None
+except ImportError:
+    ENABLE_DIAGNOSTICS = False
+    diagnostic_monitor = None
+    track_request = None
+
 # Initialize settings and logging
 settings = SettingsManager()
 logger = setup_logging(log_level=settings.get('log_level', 'INFO'))
@@ -56,6 +70,14 @@ converter = AIConverter(
 # Initialize job manager
 job_manager = JobManager(max_jobs=100, ttl_hours=24)
 logger.info("Job manager initialized")
+
+# Log diagnostic status
+if ENABLE_DIAGNOSTICS and diagnostic_monitor:
+    logger.warning("=" * 80)
+    logger.warning("DIAGNOSTIC MODE ENABLED")
+    logger.warning("Detailed request lifecycle and lock monitoring is active")
+    logger.warning("Performance may be impacted - disable for production")
+    logger.warning("=" * 80)
 
 
 # Request/Response Models
@@ -141,12 +163,24 @@ async def process_html(request: ProcessHTMLRequest):
     """
     Main processing endpoint: preprocess HTML and convert to markdown
     """
+    import uuid
+    request_id = str(uuid.uuid4())[:8]
+
+    # Start diagnostic tracking
+    if diagnostic_monitor:
+        diagnostic_monitor.log_request_start("POST /process-html", request_id, {
+            'url': request.url,
+            'html_size': len(request.html),
+            'use_ai': request.use_ai,
+            'extraction_mode': request.extraction_mode
+        })
+
     job = None
     job_id = request.job_id
 
     try:
-        logger.info(f"Processing request for URL: {request.url}")
-        logger.debug(f"HTML size: {len(request.html)} chars, use_ai: {request.use_ai}")
+        logger.info(f"[{request_id}] Processing request for URL: {request.url}")
+        logger.debug(f"[{request_id}] HTML size: {len(request.html)} chars, use_ai: {request.use_ai}")
 
         # Create or get job if job_id provided
         if job_id:
@@ -223,7 +257,7 @@ async def process_html(request: ProcessHTMLRequest):
         # Step 6: Count words in markdown
         word_count = len(re.findall(r'\w+', markdown))
 
-        logger.info(f"Processing complete - {word_count} words, AI used: {used_ai}")
+        logger.info(f"[{request_id}] Processing complete - {word_count} words, AI used: {used_ai}")
 
         # Mark job as complete
         job.update_progress(4, 4, 'Complete!')
@@ -235,6 +269,10 @@ async def process_html(request: ProcessHTMLRequest):
             'used_ai': used_ai
         }
         job.complete(result)
+
+        # End diagnostic tracking (success)
+        if diagnostic_monitor:
+            diagnostic_monitor.log_request_end(request_id, status="success")
 
         return ProcessHTMLResponse(
             markdown=markdown,
@@ -249,7 +287,12 @@ async def process_html(request: ProcessHTMLRequest):
         )
 
     except Exception as e:
-        logger.error(f"Error processing HTML: {str(e)}", exc_info=True)
+        logger.error(f"[{request_id}] Error processing HTML: {str(e)}", exc_info=True)
+
+        # Log exception in diagnostics
+        if diagnostic_monitor:
+            diagnostic_monitor.log_exception(f"POST /process-html ({request_id})", e)
+            diagnostic_monitor.log_request_end(request_id, status="error", error=str(e))
 
         # Mark job as failed if job exists
         if job:
@@ -362,6 +405,18 @@ async def delete_job(job_id: str):
     except Exception as e:
         logger.error(f"Error deleting job: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/diagnostics")
+async def get_diagnostics():
+    """
+    Get diagnostic status report (only available when ENABLE_DIAGNOSTICS=true)
+    """
+    if not ENABLE_DIAGNOSTICS or not diagnostic_monitor:
+        raise HTTPException(status_code=404, detail="Diagnostics not enabled. Set ENABLE_DIAGNOSTICS=true environment variable")
+
+    diagnostic_monitor.print_status_report()
+    return diagnostic_monitor.get_status_report()
 
 
 def _generate_filename(text: str) -> str:
