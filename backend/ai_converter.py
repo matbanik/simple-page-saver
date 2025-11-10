@@ -113,12 +113,22 @@ Guidelines:
             "X-Title": "Simple Page Saver"  # Optional
         }
 
+        # Log full request (without API key)
+        print(f"[OpenRouter Request]")
+        print(f"  URL: {self.base_url}")
+        print(f"  Model: {payload['model']}")
+        print(f"  System Prompt: {payload['messages'][0]['content'][:200]}...")
+        print(f"  User Prompt Length: {len(payload['messages'][1]['content'])} chars")
+        print(f"  Max Tokens: {payload['max_tokens']}")
+        print(f"  Temperature: {payload['temperature']}")
+
         # Implement retry logic with exponential backoff
         max_retries = 3
         retry_delay = 1
 
         for attempt in range(max_retries):
             try:
+                print(f"[OpenRouter] Sending request (attempt {attempt + 1}/{max_retries})...")
                 response = requests.post(
                     self.base_url,
                     json=payload,
@@ -126,11 +136,19 @@ Guidelines:
                     timeout=60
                 )
 
+                print(f"[OpenRouter Response] Status: {response.status_code}")
+
                 if response.status_code == 200:
                     result = response.json()
+                    print(f"[OpenRouter Response] Success!")
+                    print(f"  Model Used: {result.get('model', 'N/A')}")
+                    print(f"  Response Length: {len(result['choices'][0]['message']['content'])} chars")
+                    if 'usage' in result:
+                        print(f"  Token Usage: {result['usage']}")
                     markdown = result['choices'][0]['message']['content']
                     return markdown.strip()
                 elif response.status_code == 429:  # Rate limit
+                    print(f"[OpenRouter] Rate limited, retrying in {retry_delay}s...")
                     if attempt < max_retries - 1:
                         time.sleep(retry_delay)
                         retry_delay *= 2
@@ -138,9 +156,12 @@ Guidelines:
                     else:
                         raise Exception(f"Rate limited after {max_retries} attempts")
                 else:
-                    raise Exception(f"API error {response.status_code}: {response.text}")
+                    error_text = response.text
+                    print(f"[OpenRouter Response] Error: {error_text}")
+                    raise Exception(f"API error {response.status_code}: {error_text}")
 
             except requests.exceptions.Timeout:
+                print(f"[OpenRouter] Request timed out after 60s")
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                     retry_delay *= 2
@@ -149,6 +170,7 @@ Guidelines:
                     raise Exception("Request timeout after retries")
 
             except requests.exceptions.RequestException as e:
+                print(f"[OpenRouter] Request exception: {str(e)}")
                 raise Exception(f"Request failed: {str(e)}")
 
         raise Exception("Failed to convert after all retries")

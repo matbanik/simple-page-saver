@@ -493,7 +493,7 @@ async function processWithBackend(url, html, title) {
                 use_ai: enableAI,  // Pass AI preference to backend
                 custom_prompt: customPrompt  // Pass custom AI instructions
             }),
-            signal: AbortSignal.timeout(60000) // 60 second timeout
+            signal: AbortSignal.timeout(120000) // 120 second timeout for large pages
         });
 
         console.log('[Backend] Response status:', response.status);

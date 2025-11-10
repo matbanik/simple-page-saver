@@ -14,25 +14,35 @@ class HTMLPreprocessor:
 
     # Tags to completely remove along with their content
     STRIP_TAGS = [
-        'script', 'style', 'noscript', 'iframe', 'embed', 'object',
-        'svg', 'canvas', 'meta', 'link', 'base'
+        'script', 'style', 'noscript', 'svg'
     ]
 
-    # Navigation and UI elements to remove
+    # Navigation and UI elements to remove (less aggressive)
     NAV_TAGS = [
-        'nav', 'header', 'footer', 'aside', 'form', 'button'
+        'nav', 'header', 'footer'
     ]
 
-    # Semantic tags to preserve
+    # Semantic tags to preserve (expanded list)
     SEMANTIC_TAGS = [
         'article', 'section', 'main', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
         'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'td', 'th',
         'blockquote', 'pre', 'code', 'a', 'img', 'strong', 'em', 'b', 'i',
-        'br', 'hr', 'div', 'span', 'dl', 'dt', 'dd'
+        'br', 'hr', 'div', 'span', 'dl', 'dt', 'dd', 'figure', 'figcaption',
+        'aside', 'form', 'label', 'input', 'button', 'select', 'textarea',
+        'details', 'summary', 'time', 'mark', 'del', 'ins'
     ]
 
-    def __init__(self):
-        pass
+    def __init__(self, mode: str = 'light'):
+        """
+        Initialize preprocessor with mode
+
+        Args:
+            mode: 'light', 'medium', or 'aggressive'
+                  light: Only remove scripts/styles, keep most structure
+                  medium: Remove nav/ads but keep content
+                  aggressive: Use readability extraction (can lose content)
+        """
+        self.mode = mode
 
     def preprocess(self, html: str, url: str = "") -> Tuple[str, dict]:
         """
@@ -47,22 +57,40 @@ class HTMLPreprocessor:
         """
         metadata = {
             'original_size': len(html),
-            'preprocessing_stages': []
+            'preprocessing_stages': [],
+            'mode': self.mode
         }
 
-        # Stage 1: Aggressive Stripping
+        # Stage 1: Always strip scripts/styles
         html = self._stage1_aggressive_strip(html)
-        metadata['preprocessing_stages'].append('aggressive_strip')
+        metadata['preprocessing_stages'].append('script_strip')
         metadata['after_stage1_size'] = len(html)
 
-        # Stage 2: Content Isolation (using readability)
-        html = self._stage2_content_isolation(html, url)
-        metadata['preprocessing_stages'].append('content_isolation')
-        metadata['after_stage2_size'] = len(html)
+        # Stage 2: Content isolation (only if medium/aggressive mode)
+        if self.mode in ['medium', 'aggressive']:
+            original_size = len(html)
+            html_extracted = self._stage2_content_isolation(html, url)
 
-        # Stage 3: Semantic Simplification
-        html = self._stage3_semantic_simplification(html)
-        metadata['preprocessing_stages'].append('semantic_simplification')
+            # Safety check: if readability removed >80%, skip it
+            reduction = (1 - len(html_extracted) / original_size) if original_size > 0 else 0
+            if reduction > 0.80:
+                print(f"[WARNING] Readability removed {reduction*100:.1f}% of content - skipping extraction")
+                metadata['preprocessing_stages'].append('content_isolation_skipped')
+                metadata['readability_skipped'] = True
+            else:
+                html = html_extracted
+                metadata['preprocessing_stages'].append('content_isolation')
+                metadata['after_stage2_size'] = len(html)
+
+        # Stage 3: Semantic simplification (lighter version)
+        if self.mode == 'aggressive':
+            html = self._stage3_semantic_simplification(html)
+            metadata['preprocessing_stages'].append('semantic_simplification')
+        else:
+            # Light cleanup only
+            html = self._light_cleanup(html)
+            metadata['preprocessing_stages'].append('light_cleanup')
+
         metadata['final_size'] = len(html)
 
         # Calculate reduction percentage
@@ -73,10 +101,10 @@ class HTMLPreprocessor:
         return html, metadata
 
     def _stage1_aggressive_strip(self, html: str) -> str:
-        """Stage 1: Remove scripts, styles, tracking, and noise"""
+        """Stage 1: Remove only scripts and styles (less aggressive)"""
         soup = BeautifulSoup(html, 'lxml')
 
-        # Remove script and style tags with content
+        # Remove only script and style tags
         for tag in self.STRIP_TAGS:
             for element in soup.find_all(tag):
                 element.decompose()
@@ -85,29 +113,24 @@ class HTMLPreprocessor:
         for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
             comment.extract()
 
-        # Remove data-* attributes, tracking pixels
-        for tag in soup.find_all(True):
-            # Remove data attributes
-            attrs_to_remove = [attr for attr in tag.attrs if attr.startswith('data-')]
-            for attr in attrs_to_remove:
-                del tag[attr]
-
-            # Remove style attributes
-            if 'style' in tag.attrs:
-                del tag['style']
-
-            # Remove class and id (we'll preserve semantic meaning through tags)
-            if 'class' in tag.attrs:
-                del tag['class']
-            if 'id' in tag.attrs:
-                del tag['id']
-
-            # Remove onclick and other event handlers
-            event_attrs = [attr for attr in tag.attrs if attr.startswith('on')]
-            for attr in event_attrs:
-                del tag[attr]
-
         return str(soup)
+
+    def _light_cleanup(self, html: str) -> str:
+        """Light cleanup: minimal processing"""
+        soup = BeautifulSoup(html, 'lxml')
+
+        # Only remove obvious navigation/footer elements
+        for tag in self.NAV_TAGS:
+            for element in soup.find_all(tag):
+                # Only remove if it has nav-like attributes
+                if element.get('role') in ['navigation', 'banner', 'contentinfo']:
+                    element.decompose()
+
+        # Keep all attributes but normalize whitespace
+        html_str = str(soup)
+        html_str = re.sub(r'\n\s*\n+', '\n\n', html_str)  # Remove excessive newlines
+
+        return html_str
 
     def _stage2_content_isolation(self, html: str, url: str) -> str:
         """Stage 2: Extract main content using readability"""
