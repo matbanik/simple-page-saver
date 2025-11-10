@@ -239,7 +239,9 @@
         <div id="ai-prompt-section" style="display: none; margin-top: 12px;">
             <label style="font-size: 12px; font-weight: 500; display: block; margin-bottom: 4px;">Custom AI Instructions:</label>
             <select id="prompt-presets" style="width: 100%; padding: 6px; margin-bottom: 6px; font-size: 12px;">
-                <option value="">-- Select Preset --</option>
+                <option value="">None</option>
+                <option value="custom">Write your own</option>
+                <option value="" disabled>──────────</option>
                 <option value="extract_products">Extract Product Details (Title, Price, Description)</option>
                 <option value="highlight_keyword">Highlight Specific Keyword</option>
                 <option value="price_comparison">Create Price Comparison Table</option>
@@ -249,7 +251,7 @@
                 <option value="link_summary">Summarize All Links and Resources</option>
             </select>
             <textarea id="custom-prompt" placeholder="Optional: Add custom instructions for AI processing..."
-                      style="width: 100%; height: 60px; padding: 6px; font-size: 12px; resize: vertical; font-family: inherit;"></textarea>
+                      style="width: 100%; height: 60px; padding: 6px; font-size: 12px; resize: vertical; font-family: inherit; display: none;"></textarea>
         </div>
     </div>
 

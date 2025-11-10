@@ -58,8 +58,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Load saved custom prompt
     const storage = await chrome.storage.local.get(['customPrompt']);
+    const customPromptTextarea = document.getElementById('custom-prompt');
+    const promptPresetSelect = document.getElementById('prompt-presets');
+
     if (storage.customPrompt) {
-        document.getElementById('custom-prompt').value = storage.customPrompt;
+        // There's a saved custom prompt - show textarea and set to "custom" mode
+        customPromptTextarea.value = storage.customPrompt;
+        customPromptTextarea.style.display = 'block';
+        promptPresetSelect.value = 'custom';
+        console.log('[Popup] Loaded saved custom prompt');
+    } else {
+        // No saved prompt - keep at "None" and textarea hidden
+        customPromptTextarea.style.display = 'none';
+        promptPresetSelect.value = '';
     }
 
     console.log('[Popup] Initialization complete');
@@ -373,8 +384,22 @@ function loadPromptPreset() {
         'link_summary': 'List all important links and resources mentioned on this page. Categorize them as:\n- Internal Links\n- External Resources\n- Download Links\n- Documentation\n- Related Content\n\nInclude a brief description for each link.'
     };
 
-    if (preset && presets[preset]) {
+    // Handle different options
+    if (preset === 'custom') {
+        // Write your own - show textarea, keep existing content
+        customPrompt.style.display = 'block';
+        console.log('[Prompt] Custom mode selected');
+    } else if (preset === '') {
+        // None - hide textarea and clear it
+        customPrompt.style.display = 'none';
+        customPrompt.value = '';
+        chrome.storage.local.set({ customPrompt: '' });
+        console.log('[Prompt] None selected');
+    } else if (presets[preset]) {
+        // Preset selected - show textarea with preset content
+        customPrompt.style.display = 'block';
         customPrompt.value = presets[preset];
+        chrome.storage.local.set({ customPrompt: presets[preset] });
         console.log('[Prompt] Loaded preset:', preset);
     }
 }
