@@ -45,8 +45,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize processors
-preprocessor = HTMLPreprocessor()
+# Initialize processors with light preprocessing mode (preserves more content)
+preprocessor = HTMLPreprocessor(mode='light')
 converter = AIConverter(
     api_key=settings.get_api_key(),
     model=settings.get('default_model')
