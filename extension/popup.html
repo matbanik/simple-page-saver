@@ -272,6 +272,113 @@
         .status-dot.orange {
             background: #ff9800;
         }
+
+        /* Job List Styles */
+        #jobs-list {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 8px;
+        }
+
+        .job-item {
+            padding: 8px;
+            margin-bottom: 6px;
+            background: #f9f9f9;
+            border-radius: 4px;
+            border-left: 3px solid #ccc;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .job-item:hover {
+            background: #f0f0f0;
+        }
+
+        .job-item.processing {
+            border-left-color: #2196F3;
+        }
+
+        .job-item.completed {
+            border-left-color: #4CAF50;
+        }
+
+        .job-item.failed {
+            border-left-color: #f44336;
+        }
+
+        .job-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 4px;
+        }
+
+        .job-title {
+            font-size: 12px;
+            font-weight: 500;
+            color: #333;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+        }
+
+        .job-status {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: #e0e0e0;
+            color: #666;
+            margin-left: 8px;
+        }
+
+        .job-status.processing {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .job-status.completed {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .job-status.failed {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .job-progress {
+            font-size: 11px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .job-progress-bar {
+            height: 4px;
+            background: #e0e0e0;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+
+        .job-progress-fill {
+            height: 100%;
+            background: #2196F3;
+            transition: width 0.3s;
+        }
+
+        .job-time {
+            font-size: 10px;
+            color: #999;
+            margin-top: 2px;
+        }
+
+        .no-jobs {
+            text-align: center;
+            color: #999;
+            font-size: 11px;
+            padding: 12px;
+        }
     </style>
 </head>
 <body>
@@ -281,6 +388,15 @@
     <div id="connection-status" class="checking">
         <span class="status-dot orange"></span>
         <span id="connection-text">Checking backend...</span>
+    </div>
+
+    <!-- Active Jobs Section -->
+    <div id="jobs-section" class="section" style="display: none;">
+        <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>📋 Active Jobs</span>
+            <button id="refresh-jobs" style="padding: 2px 8px; font-size: 11px; background: #e0e0e0; border: none; border-radius: 3px; cursor: pointer;">Refresh</button>
+        </div>
+        <div id="jobs-list"></div>
     </div>
 
     <div class="section">

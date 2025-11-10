@@ -17,7 +17,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Check connection state
     updateConnectionStatus();
 
+    // Load and display jobs
+    loadJobs();
+
     // Set up event listeners
+    document.getElementById('refresh-jobs').addEventListener('click', loadJobs);
     document.getElementById('extract-current').addEventListener('click', extractCurrentPage);
     document.getElementById('map-site').addEventListener('click', mapSite);
     document.getElementById('extract-selected').addEventListener('click', extractSelectedPages);
@@ -80,6 +84,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Update connection status periodically
     setInterval(updateConnectionStatus, 10000); // Every 10 seconds
+
+    // Refresh jobs periodically
+    setInterval(loadJobs, 5000); // Every 5 seconds
 });
 
 // Extract current page
@@ -622,4 +629,122 @@ async function updateConnectionStatus() {
     } catch (error) {
         console.warn('[Popup] Could not get connection state:', error);
     }
+}
+
+// Load and display jobs from backend
+async function loadJobs() {
+    try {
+        const storage = await chrome.storage.local.get(['apiEndpoint']);
+        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+
+        const response = await fetch(`${apiUrl}/jobs?limit=20`);
+        if (!response.ok) {
+            console.warn('[Jobs] Failed to load jobs:', response.status);
+            return;
+        }
+
+        const data = await response.json();
+        displayJobs(data.jobs);
+    } catch (error) {
+        console.warn('[Jobs] Error loading jobs:', error);
+    }
+}
+
+// Display jobs in the UI
+function displayJobs(jobs) {
+    const jobsList = document.getElementById('jobs-list');
+    const jobsSection = document.getElementById('jobs-section');
+
+    // Filter for active or recent jobs
+    const relevantJobs = jobs.filter(job =>
+        job.status === 'processing' ||
+        job.status === 'pending' ||
+        (job.status === 'completed' && isRecent(job.completed_at)) ||
+        (job.status === 'failed' && isRecent(job.completed_at))
+    );
+
+    if (relevantJobs.length === 0) {
+        jobsSection.style.display = 'none';
+        return;
+    }
+
+    jobsSection.style.display = 'block';
+    jobsList.innerHTML = '';
+
+    relevantJobs.forEach(job => {
+        const jobItem = createJobElement(job);
+        jobsList.appendChild(jobItem);
+    });
+}
+
+// Create job element
+function createJobElement(job) {
+    const div = document.createElement('div');
+    div.className = `job-item ${job.status}`;
+    div.dataset.jobId = job.id;
+
+    const title = job.params.title || job.params.url || 'Unknown';
+    const statusText = job.status.charAt(0).toUpperCase() + job.status.slice(1);
+    const progress = job.progress || { current: 0, total: 0, message: '', percent: 0 };
+
+    div.innerHTML = `
+        <div class="job-header">
+            <div class="job-title" title="${title}">${truncate(title, 40)}</div>
+            <div class="job-status ${job.status}">${statusText}</div>
+        </div>
+        ${progress.message ? `<div class="job-progress">${progress.message}</div>` : ''}
+        ${job.status === 'processing' || job.status === 'pending' ? `
+            <div class="job-progress-bar">
+                <div class="job-progress-fill" style="width: ${progress.percent || 0}%"></div>
+            </div>
+        ` : ''}
+        <div class="job-time">${getTimeAgo(job.created_at)}</div>
+    `;
+
+    div.addEventListener('click', () => handleJobClick(job));
+
+    return div;
+}
+
+// Handle clicking on a job
+async function handleJobClick(job) {
+    console.log('[Jobs] Clicked job:', job.id);
+
+    // For completed jobs, show result details
+    if (job.status === 'completed' && job.result) {
+        showStatus(`Job completed: ${job.result.filename} (${job.result.word_count} words)`, 'success');
+    } else if (job.status === 'failed') {
+        showStatus(`Job failed: ${job.error}`, 'error');
+    } else if (job.status === 'processing') {
+        const progress = job.progress || {};
+        showStatus(`Job in progress: ${progress.message || 'Processing...'}`, 'info');
+    }
+
+    // TODO: Restore job context (for multi-page jobs)
+    // This could restore the URL list for site mapping, etc.
+}
+
+// Helper: Check if timestamp is recent (within last hour)
+function isRecent(timestamp) {
+    if (!timestamp) return false;
+    const time = new Date(timestamp);
+    const now = new Date();
+    return (now - time) < 3600000; // 1 hour in milliseconds
+}
+
+// Helper: Get time ago string
+function getTimeAgo(timestamp) {
+    const time = new Date(timestamp);
+    const now = new Date();
+    const seconds = Math.floor((now - time) / 1000);
+
+    if (seconds < 60) return `${seconds}s ago`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    return `${Math.floor(seconds / 3600)}h ago`;
+}
+
+// Helper: Truncate string
+function truncate(str, maxLength) {
+    if (str.length <= maxLength) return str;
+    return str.substring(0, maxLength - 3) + '...';
 }

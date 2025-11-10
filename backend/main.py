@@ -14,6 +14,7 @@ from preprocessing import HTMLPreprocessor, estimate_tokens
 from ai_converter import AIConverter, estimate_cost
 from settings_manager import SettingsManager
 from logging_config import setup_logging, log_ai_request, log_ai_response
+from job_manager import JobManager, Job
 
 # Initialize settings and logging
 settings = SettingsManager()
@@ -52,6 +53,10 @@ converter = AIConverter(
     model=settings.get('default_model')
 )
 
+# Initialize job manager
+job_manager = JobManager(max_jobs=100, ttl_hours=24)
+logger.info("Job manager initialized")
+
 
 # Request/Response Models
 class ProcessHTMLRequest(BaseModel):
@@ -60,6 +65,7 @@ class ProcessHTMLRequest(BaseModel):
     title: Optional[str] = ""
     use_ai: Optional[bool] = True
     custom_prompt: Optional[str] = ""
+    job_id: Optional[str] = None  # If provided, update existing job
 
 
 class ProcessHTMLResponse(BaseModel):
@@ -71,6 +77,7 @@ class ProcessHTMLResponse(BaseModel):
     used_ai: bool
     error: Optional[str] = None
     metadata: dict
+    job_id: Optional[str] = None  # Job ID if job tracking is enabled
 
 
 class ExtractLinksRequest(BaseModel):
@@ -97,6 +104,24 @@ class EstimateCostResponse(BaseModel):
     model: str
 
 
+class JobResponse(BaseModel):
+    id: str
+    type: str
+    status: str
+    params: dict
+    created_at: str
+    started_at: Optional[str]
+    completed_at: Optional[str]
+    progress: dict
+    result: Optional[dict]
+    error: Optional[str]
+
+
+class JobListResponse(BaseModel):
+    jobs: List[dict]
+    total: int
+
+
 # Endpoints
 @app.get("/")
 async def health_check():
@@ -115,13 +140,36 @@ async def process_html(request: ProcessHTMLRequest):
     """
     Main processing endpoint: preprocess HTML and convert to markdown
     """
+    job = None
+    job_id = request.job_id
+
     try:
         logger.info(f"Processing request for URL: {request.url}")
         logger.debug(f"HTML size: {len(request.html)} chars, use_ai: {request.use_ai}")
 
+        # Create or get job if job_id provided
+        if job_id:
+            job = job_manager.get_job(job_id)
+            if not job:
+                raise HTTPException(status_code=404, detail="Job not found")
+            job.start()
+        else:
+            # Create new job for tracking
+            job = job_manager.create_job(
+                job_type=Job.TYPE_SINGLE_PAGE,
+                params={'url': request.url, 'title': request.title or 'Unknown'}
+            )
+            job.start()
+            job_id = job.id
+            logger.info(f"Created job: {job_id}")
+
+        job.update_progress(0, 4, 'Preprocessing HTML...')
+
         # Step 1: Preprocess HTML
         cleaned_html, prep_metadata = preprocessor.preprocess(request.html, request.url)
         logger.info(f"Preprocessing complete - reduced from {prep_metadata['original_size']} to {prep_metadata['final_size']} chars ({prep_metadata.get('reduction_percentage', 0)}% reduction)")
+
+        job.update_progress(1, 4, 'Preprocessing complete')
 
         # Step 2: Estimate tokens
         token_count = estimate_tokens(cleaned_html)
@@ -129,11 +177,13 @@ async def process_html(request: ProcessHTMLRequest):
         logger.debug(f"Estimated tokens: {token_count}")
 
         # Step 3: Extract media links
+        job.update_progress(2, 4, 'Extracting links...')
         links_data = preprocessor.extract_links(request.html, request.url)
         media_urls = links_data['media_links']
         logger.debug(f"Extracted {len(media_urls)} media URLs")
 
         # Step 4: Convert to markdown (with chunking if needed)
+        job.update_progress(3, 4, 'Converting to markdown...')
         if not request.use_ai:
             logger.info("AI disabled by user, using fallback")
             log_ai_request(logger, "fallback", len(cleaned_html), {})
@@ -168,6 +218,17 @@ async def process_html(request: ProcessHTMLRequest):
 
         logger.info(f"Processing complete - {word_count} words, AI used: {used_ai}")
 
+        # Mark job as complete
+        job.update_progress(4, 4, 'Complete!')
+        result = {
+            'markdown': markdown,
+            'media_urls': media_urls,
+            'filename': filename,
+            'word_count': word_count,
+            'used_ai': used_ai
+        }
+        job.complete(result)
+
         return ProcessHTMLResponse(
             markdown=markdown,
             media_urls=media_urls,
@@ -176,11 +237,17 @@ async def process_html(request: ProcessHTMLRequest):
             success=True,
             used_ai=used_ai,
             error=error,
-            metadata=prep_metadata
+            metadata=prep_metadata,
+            job_id=job_id
         )
 
     except Exception as e:
         logger.error(f"Error processing HTML: {str(e)}", exc_info=True)
+
+        # Mark job as failed if job exists
+        if job:
+            job.fail(str(e))
+
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -226,6 +293,67 @@ async def estimate_cost_endpoint(request: EstimateCostRequest):
 
     except Exception as e:
         logger.error(f"Error estimating cost: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/jobs", response_model=JobListResponse)
+async def list_jobs(status: Optional[str] = None, limit: int = 50):
+    """
+    List all jobs, optionally filtered by status
+    """
+    try:
+        logger.debug(f"Listing jobs - status: {status}, limit: {limit}")
+        jobs = job_manager.list_jobs(status=status, limit=limit)
+
+        return JobListResponse(
+            jobs=jobs,
+            total=len(jobs)
+        )
+
+    except Exception as e:
+        logger.error(f"Error listing jobs: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/jobs/{job_id}", response_model=JobResponse)
+async def get_job(job_id: str):
+    """
+    Get details of a specific job
+    """
+    try:
+        logger.debug(f"Getting job: {job_id}")
+        job = job_manager.get_job(job_id)
+
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        return JobResponse(**job.to_dict())
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting job: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/jobs/{job_id}")
+async def delete_job(job_id: str):
+    """
+    Delete a job
+    """
+    try:
+        logger.debug(f"Deleting job: {job_id}")
+        success = job_manager.delete_job(job_id)
+
+        if not success:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        return {"success": True, "message": "Job deleted"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting job: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
