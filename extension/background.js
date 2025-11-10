@@ -15,7 +15,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log('[Simple Page Saver] Received message:', request.action);
 
     if (request.action === 'EXTRACT_SINGLE_PAGE') {
-        handleExtractSinglePage(request.url)
+        handleExtractSinglePage(request.url, request.outputZip)
             .then(response => {
                 console.log('[Simple Page Saver] Extract complete:', response);
                 sendResponse(response);
@@ -37,7 +37,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
         return true;
     } else if (request.action === 'EXTRACT_MULTIPLE_PAGES') {
-        handleExtractMultiplePages(request.urls, request.outputZip)
+        handleExtractMultiplePages(request.urls, request.outputZip, request.mergeIntoSingle)
             .then(response => {
                 console.log('[Simple Page Saver] Multi-extract complete:', response);
                 sendResponse(response);
@@ -50,9 +50,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 });
 
+// Show notification
+function showNotification(title, message, type = 'basic') {
+    chrome.notifications.create({
+        type: type,
+        iconUrl: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y="75" font-size="75">📄</text></svg>',
+        title: title,
+        message: message,
+        priority: 2
+    });
+}
+
 // Extract a single page
-async function handleExtractSinglePage(url) {
+async function handleExtractSinglePage(url, outputZip = false) {
     console.log('[Extract] Starting extraction for:', url);
+    console.log('[Extract] Output as ZIP:', outputZip);
+
+    // Check backend health first
+    const health = await checkBackendHealth();
+    if (!health.healthy) {
+        showNotification('Backend Error', health.error);
+        return {
+            success: false,
+            error: health.error
+        };
+    }
+
+    showNotification('Simple Page Saver', 'Extracting page...');
 
     try {
         // Open the page in a new tab
@@ -79,15 +103,25 @@ async function handleExtractSinglePage(url) {
         const result = await processWithBackend(url, pageData.html, pageData.title);
         console.log('[Extract] Backend response received:', result.filename);
 
-        // Download the markdown file
-        console.log('[Extract] Downloading markdown file...');
-        await downloadFile(result.markdown, result.filename);
+        // Download based on user preference
+        if (outputZip) {
+            // Create ZIP file with markdown and media links
+            console.log('[Extract] Creating ZIP file...');
+            await createAndDownloadZip([result], result.media_urls || []);
+            showNotification('Extraction Complete', `Saved as ZIP: ${result.filename}\nWords: ${result.word_count}\nAI: ${result.used_ai ? 'Yes' : 'No'}`);
+        } else {
+            // Download individual files
+            console.log('[Extract] Downloading markdown file...');
+            await downloadFile(result.markdown, result.filename);
 
-        // If there are media links, create media_links.txt
-        if (result.media_urls && result.media_urls.length > 0) {
-            console.log('[Extract] Downloading media links file...');
-            const mediaContent = result.media_urls.join('\n');
-            await downloadFile(mediaContent, 'media_links.txt');
+            // If there are media links, create media_links.txt
+            if (result.media_urls && result.media_urls.length > 0) {
+                console.log('[Extract] Downloading media links file...');
+                const mediaContent = result.media_urls.join('\n');
+                await downloadFile(mediaContent, 'media_links.txt');
+            }
+
+            showNotification('Extraction Complete', `Saved: ${result.filename}\nWords: ${result.word_count}\nAI: ${result.used_ai ? 'Yes' : 'No'}`);
         }
 
         // Close the tab after processing is complete (don't block on errors)
@@ -100,6 +134,7 @@ async function handleExtractSinglePage(url) {
         }
 
         console.log('[Extract] Success!');
+
         return {
             success: true,
             filename: result.filename,
@@ -108,6 +143,7 @@ async function handleExtractSinglePage(url) {
         };
     } catch (error) {
         console.error('[Extract] Error:', error);
+        showNotification('Extraction Failed', error.message);
         return {
             success: false,
             error: error.message
@@ -117,6 +153,19 @@ async function handleExtractSinglePage(url) {
 
 // Map site and discover URLs
 async function handleMapSite(startUrl, depth) {
+    // Check backend health first
+    const health = await checkBackendHealth();
+    if (!health.healthy) {
+        showNotification('Backend Error', health.error);
+        return {
+            success: false,
+            error: health.error,
+            urls: []
+        };
+    }
+
+    showNotification('Site Mapping', `Mapping site with depth ${depth}...`);
+
     try {
         const discoveredUrls = new Set([startUrl]);
         const processedUrls = new Set();
@@ -185,12 +234,15 @@ async function handleMapSite(startUrl, depth) {
         // Add the start URL to the list
         urlDataList.unshift({ url: startUrl, type: 'internal', level: 0 });
 
+        showNotification('Mapping Complete', `Found ${urlDataList.length} URLs (Internal: ${urlDataList.filter(u => u.type === 'internal').length}, External: ${urlDataList.filter(u => u.type === 'external').length}, Media: ${urlDataList.filter(u => u.type === 'media').length})`);
+
         return {
             success: true,
             urls: urlDataList
         };
     } catch (error) {
         console.error('Map site error:', error);
+        showNotification('Mapping Failed', error.message);
         return {
             success: false,
             error: error.message,
@@ -200,7 +252,19 @@ async function handleMapSite(startUrl, depth) {
 }
 
 // Extract multiple pages
-async function handleExtractMultiplePages(urls, outputZip) {
+async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = false) {
+    // Check backend health first
+    const health = await checkBackendHealth();
+    if (!health.healthy) {
+        showNotification('Backend Error', health.error);
+        return {
+            success: false,
+            error: health.error
+        };
+    }
+
+    showNotification('Batch Extraction', `Processing ${urls.length} pages...`);
+
     try {
         const results = [];
         const allMediaUrls = new Set();
@@ -224,6 +288,8 @@ async function handleExtractMultiplePages(urls, outputZip) {
                 // Process with backend
                 const result = await processWithBackend(url, pageData.html, pageData.title);
 
+                // Add source URL to result for merged output
+                result.sourceUrl = url;
                 results.push(result);
 
                 // Collect media URLs
@@ -257,19 +323,45 @@ async function handleExtractMultiplePages(urls, outputZip) {
         }
 
         // Download results
-        if (outputZip) {
-            // Create ZIP file
-            await createAndDownloadZip(results, Array.from(allMediaUrls));
-        } else {
-            // Download individual files
-            for (const result of results) {
-                await downloadFile(result.markdown, result.filename);
-            }
+        if (mergeIntoSingle) {
+            // Merge all markdown content into single file
+            const mergedContent = createMergedMarkdown(results, Array.from(allMediaUrls));
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
+            const mergedFilename = `merged_pages_${results.length}_${timestamp}.md`;
 
-            // Download media links file
-            if (allMediaUrls.size > 0) {
-                const mediaContent = Array.from(allMediaUrls).join('\n');
-                await downloadFile(mediaContent, 'media_links.txt');
+            if (outputZip) {
+                // Create ZIP with single merged file
+                await createAndDownloadZip([{ markdown: mergedContent, filename: mergedFilename }], Array.from(allMediaUrls));
+                showNotification('Batch Extraction Complete', `Merged ${results.length} pages into single file in ZIP`);
+            } else {
+                // Download single merged file
+                await downloadFile(mergedContent, mergedFilename);
+                // Download media links file
+                if (allMediaUrls.size > 0) {
+                    const mediaContent = Array.from(allMediaUrls).join('\n');
+                    await downloadFile(mediaContent, 'media_links.txt');
+                }
+                showNotification('Batch Extraction Complete', `Merged ${results.length} pages into single file`);
+            }
+        } else {
+            // Original behavior: individual files or ZIP with multiple files
+            if (outputZip) {
+                // Create ZIP file
+                await createAndDownloadZip(results, Array.from(allMediaUrls));
+                showNotification('Batch Extraction Complete', `Extracted ${results.length} pages into ZIP file`);
+            } else {
+                // Download individual files
+                for (const result of results) {
+                    await downloadFile(result.markdown, result.filename);
+                }
+
+                // Download media links file
+                if (allMediaUrls.size > 0) {
+                    const mediaContent = Array.from(allMediaUrls).join('\n');
+                    await downloadFile(mediaContent, 'media_links.txt');
+                }
+
+                showNotification('Batch Extraction Complete', `Extracted ${results.length} pages as individual files`);
             }
         }
 
@@ -279,11 +371,57 @@ async function handleExtractMultiplePages(urls, outputZip) {
         };
     } catch (error) {
         console.error('Extract multiple pages error:', error);
+        showNotification('Batch Extraction Failed', error.message);
         return {
             success: false,
             error: error.message
         };
     }
+}
+
+// Create merged markdown from multiple results
+function createMergedMarkdown(results, mediaUrls) {
+    const timestamp = new Date().toISOString();
+    const parts = [];
+
+    // Add header
+    parts.push(`# Merged Page Extraction\n`);
+    parts.push(`**Extracted:** ${timestamp}`);
+    parts.push(`**Total Pages:** ${results.length}\n`);
+    parts.push(`---\n`);
+
+    // Add table of contents
+    parts.push(`## Table of Contents\n`);
+    results.forEach((result, index) => {
+        const anchor = `page-${index + 1}`;
+        const title = result.filename.replace('.md', '');
+        parts.push(`${index + 1}. [${title}](#${anchor})`);
+    });
+    parts.push(`\n---\n`);
+
+    // Add each page's content
+    results.forEach((result, index) => {
+        const anchor = `page-${index + 1}`;
+        parts.push(`\n## <a name="${anchor}"></a>Page ${index + 1}: ${result.filename.replace('.md', '')}\n`);
+        if (result.sourceUrl) {
+            parts.push(`**Source:** ${result.sourceUrl}`);
+        }
+        parts.push(`**Words:** ${result.word_count || 'N/A'}`);
+        parts.push(`**AI Used:** ${result.used_ai ? 'Yes' : 'No'}\n`);
+        parts.push(result.markdown);
+        parts.push(`\n---\n`);
+    });
+
+    // Add media links section if any
+    if (mediaUrls.length > 0) {
+        parts.push(`\n## Media Links\n`);
+        parts.push(`Total media files found: ${mediaUrls.length}\n`);
+        mediaUrls.forEach(url => {
+            parts.push(`- ${url}`);
+        });
+    }
+
+    return parts.join('\n');
 }
 
 // Extract page data using content script
@@ -302,6 +440,31 @@ async function extractPageData(tabId) {
     return results[0].result;
 }
 
+// Check if backend is running
+async function checkBackendHealth() {
+    try {
+        const storage = await chrome.storage.local.get(['apiEndpoint']);
+        const apiUrl = storage.apiEndpoint || API_BASE_URL;
+
+        const response = await fetch(`${apiUrl}/`, {
+            method: 'GET',
+            signal: AbortSignal.timeout(5000) // 5 second timeout
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            return { healthy: true, aiEnabled: data.ai_enabled };
+        }
+        return { healthy: false, error: 'Backend responded with error' };
+    } catch (error) {
+        console.error('[Backend] Health check failed:', error);
+        return {
+            healthy: false,
+            error: 'Backend server is not running. Please start the backend server first.\n\nRun: python launcher.py\nor: SimplePageSaver.exe'
+        };
+    }
+}
+
 // Process HTML with backend
 async function processWithBackend(url, html, title) {
     // Get API URL, AI setting, and custom prompt from chrome.storage
@@ -317,29 +480,39 @@ async function processWithBackend(url, html, title) {
     }
     console.log('[Backend] Sending request to /process-html');
 
-    const response = await fetch(`${apiUrl}/process-html`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            url,
-            html,
-            title,
-            use_ai: enableAI,  // Pass AI preference to backend
-            custom_prompt: customPrompt  // Pass custom AI instructions
-        })
-    });
+    try {
+        const response = await fetch(`${apiUrl}/process-html`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                url,
+                html,
+                title,
+                use_ai: enableAI,  // Pass AI preference to backend
+                custom_prompt: customPrompt  // Pass custom AI instructions
+            }),
+            signal: AbortSignal.timeout(60000) // 60 second timeout
+        });
 
-    console.log('[Backend] Response status:', response.status);
+        console.log('[Backend] Response status:', response.status);
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[Backend] Error response:', errorText);
-        throw new Error(`Backend error: ${response.status} ${response.statusText}`);
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[Backend] Error response:', errorText);
+            throw new Error(`Backend error: ${response.status} ${response.statusText}`);
+        }
+
+        return await response.json();
+    } catch (error) {
+        if (error.name === 'TimeoutError') {
+            throw new Error('Backend request timed out. The page may be too large.');
+        } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
+            throw new Error('Cannot connect to backend server. Please start the backend:\n\nRun: python launcher.py\nor: SimplePageSaver.exe');
+        }
+        throw error;
     }
-
-    return await response.json();
 }
 
 // Extract links using backend
