@@ -10,6 +10,16 @@ from pathlib import Path
 
 def main():
     """Main launcher entry point"""
+    # Pre-process arguments to handle -gui (single dash) as --gui
+    processed_args = []
+    for arg in sys.argv[1:]:
+        if arg == '-gui':
+            processed_args.append('--gui')
+        elif arg == '-server':
+            processed_args.append('--server')
+        else:
+            processed_args.append(arg)
+
     parser = argparse.ArgumentParser(
         description='Simple Page Saver Backend Server',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -18,6 +28,7 @@ Examples:
   SimplePageSaver.exe              Start server directly (default)
   SimplePageSaver.exe -gui         Launch management GUI
   SimplePageSaver.exe --gui        Launch management GUI
+  SimplePageSaver.exe -g           Launch management GUI
   SimplePageSaver.exe -s           Start server directly
   SimplePageSaver.exe --server     Start server directly
   SimplePageSaver.exe -p 8080      Start server on port 8080
@@ -49,7 +60,7 @@ Examples:
         help='Log level (overrides settings)'
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(processed_args)
 
     # Determine mode
     if args.gui:
