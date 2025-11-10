@@ -35,6 +35,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
+    // Test button listeners
+    document.getElementById('toggle-tests').addEventListener('click', toggleTests);
+    document.getElementById('test-backend').addEventListener('click', testBackend);
+    document.getElementById('test-ai').addEventListener('click', testAI);
+    document.getElementById('test-fallback').addEventListener('click', testFallback);
+
     console.log('[Popup] Initialization complete');
 });
 
@@ -278,4 +284,153 @@ function disableButtons(disabled) {
     document.getElementById('extract-current').disabled = disabled;
     document.getElementById('map-site').disabled = disabled;
     document.getElementById('extract-selected').disabled = disabled;
+}
+
+// Toggle test buttons visibility
+function toggleTests() {
+    const testButtons = document.getElementById('test-buttons');
+    const toggleBtn = document.getElementById('toggle-tests');
+
+    if (testButtons.style.display === 'none') {
+        testButtons.style.display = 'block';
+        toggleBtn.textContent = 'Hide';
+    } else {
+        testButtons.style.display = 'none';
+        toggleBtn.textContent = 'Show';
+    }
+}
+
+// Test backend connection
+async function testBackend() {
+    console.log('[Test] Testing backend connection...');
+    showStatus('Testing backend connection...', 'info');
+
+    try {
+        const storage = await chrome.storage.local.get(['apiEndpoint']);
+        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+
+        console.log('[Test] Connecting to:', apiUrl);
+
+        const response = await fetch(apiUrl);
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        console.log('[Test] Backend response:', data);
+
+        const aiStatus = data.ai_enabled ? '✓ AI Enabled' : '⚠ AI Disabled (using fallback)';
+        showStatus(`✓ Backend Connected! ${aiStatus}`, 'success');
+    } catch (error) {
+        console.error('[Test] Backend test failed:', error);
+        showStatus(`✗ Backend Error: ${error.message}`, 'error');
+    }
+}
+
+// Test AI processing
+async function testAI() {
+    console.log('[Test] Testing AI processing...');
+    showStatus('Testing AI processing...', 'info');
+
+    try {
+        const storage = await chrome.storage.local.get(['apiEndpoint']);
+        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+
+        const testHTML = `
+            <html>
+            <body>
+                <h1>Test Page</h1>
+                <p>This is a <strong>test page</strong> for AI conversion.</p>
+                <ul>
+                    <li>Item 1</li>
+                    <li>Item 2</li>
+                </ul>
+                <a href="https://example.com">Example Link</a>
+            </body>
+            </html>
+        `;
+
+        console.log('[Test] Sending test HTML to backend...');
+
+        const response = await fetch(`${apiUrl}/process-html`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                url: 'https://test.example.com',
+                html: testHTML,
+                title: 'Test Page'
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        console.log('[Test] AI processing result:', result);
+
+        const method = result.used_ai ? '✓ AI' : '⚠ Fallback (html2text)';
+        const preview = result.markdown.substring(0, 100) + '...';
+
+        showStatus(`✓ Processing Success! Method: ${method}\nPreview: ${preview}`, 'success');
+    } catch (error) {
+        console.error('[Test] AI test failed:', error);
+        showStatus(`✗ AI Test Error: ${error.message}`, 'error');
+    }
+}
+
+// Test local fallback processing
+async function testFallback() {
+    console.log('[Test] Testing local fallback...');
+    showStatus('Testing local fallback (html2text)...', 'info');
+
+    try {
+        const storage = await chrome.storage.local.get(['apiEndpoint']);
+        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+
+        const testHTML = `
+            <html>
+            <body>
+                <h1>Fallback Test</h1>
+                <p>This tests the html2text fallback when AI is unavailable.</p>
+                <blockquote>This is a quote</blockquote>
+                <code>const x = 42;</code>
+            </body>
+            </html>
+        `;
+
+        console.log('[Test] Testing fallback processing...');
+
+        const response = await fetch(`${apiUrl}/process-html`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                url: 'https://fallback.example.com',
+                html: testHTML,
+                title: 'Fallback Test'
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        console.log('[Test] Fallback result:', result);
+
+        const method = result.used_ai ? 'AI (not fallback!)' : '✓ Fallback (html2text)';
+        showStatus(`✓ Fallback Test Success! Used: ${method}`, 'success');
+
+        if (result.used_ai) {
+            showStatus(`⚠ Note: AI was used instead of fallback. This means API key is configured.`, 'info');
+        }
+    } catch (error) {
+        console.error('[Test] Fallback test failed:', error);
+        showStatus(`✗ Fallback Test Error: ${error.message}`, 'error');
+    }
 }
