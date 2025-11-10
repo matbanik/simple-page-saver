@@ -10,11 +10,144 @@ const DELAY_AFTER_LOAD = 2000; // Wait 2 seconds after page load for dynamic con
 console.log('[Simple Page Saver] Background service worker loaded');
 console.log('[Simple Page Saver] JSZip available:', typeof JSZip !== 'undefined');
 
+// Connection state management
+const connectionState = {
+    isConnected: false,
+    lastSuccessfulPing: null,
+    consecutiveFailures: 0,
+    aiEnabled: false,
+    monitoring: false
+};
+
+// Start periodic health monitoring
+startHealthMonitoring();
+
+// Periodic health monitoring (every 30 seconds)
+function startHealthMonitoring() {
+    if (connectionState.monitoring) return;
+
+    connectionState.monitoring = true;
+    console.log('[Connection] Starting periodic health monitoring');
+
+    // Initial check
+    checkBackendHealthQuiet();
+
+    // Check every 30 seconds
+    setInterval(async () => {
+        await checkBackendHealthQuiet();
+    }, 30000);
+}
+
+// Quiet health check (doesn't show notifications)
+async function checkBackendHealthQuiet() {
+    try {
+        const storage = await chrome.storage.local.get(['apiEndpoint']);
+        const apiUrl = storage.apiEndpoint || API_BASE_URL;
+
+        const response = await fetch(`${apiUrl}/`, {
+            method: 'GET',
+            signal: AbortSignal.timeout(5000)
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            const wasDisconnected = !connectionState.isConnected;
+
+            connectionState.isConnected = true;
+            connectionState.lastSuccessfulPing = Date.now();
+            connectionState.consecutiveFailures = 0;
+            connectionState.aiEnabled = data.ai_enabled;
+
+            if (wasDisconnected) {
+                console.log('[Connection] ✓ Backend reconnected');
+            }
+
+            return true;
+        } else {
+            handleConnectionFailure();
+            return false;
+        }
+    } catch (error) {
+        handleConnectionFailure();
+        return false;
+    }
+}
+
+// Handle connection failure
+function handleConnectionFailure() {
+    connectionState.consecutiveFailures++;
+
+    if (connectionState.isConnected) {
+        console.warn('[Connection] Backend connection lost');
+        connectionState.isConnected = false;
+    }
+
+    if (connectionState.consecutiveFailures === 1) {
+        console.warn('[Connection] First connection failure detected');
+    } else if (connectionState.consecutiveFailures % 5 === 0) {
+        console.error(`[Connection] ${connectionState.consecutiveFailures} consecutive failures`);
+    }
+}
+
+// Retry utility with exponential backoff
+async function retryWithBackoff(operation, operationName, maxRetries = 3) {
+    let lastError;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            console.log(`[Retry] ${operationName} - Attempt ${attempt}/${maxRetries}`);
+            const result = await operation();
+
+            // Success - reset failure counter
+            if (connectionState.consecutiveFailures > 0) {
+                console.log(`[Retry] ${operationName} succeeded after ${connectionState.consecutiveFailures} failures`);
+                connectionState.consecutiveFailures = 0;
+            }
+
+            return result;
+        } catch (error) {
+            lastError = error;
+            console.warn(`[Retry] ${operationName} failed on attempt ${attempt}:`, error.message);
+
+            // If it's the last attempt, throw the error
+            if (attempt === maxRetries) {
+                console.error(`[Retry] ${operationName} failed after ${maxRetries} attempts`);
+                break;
+            }
+
+            // Check if backend is healthy before retrying
+            const health = await checkBackendHealthQuiet();
+            if (!health) {
+                console.warn(`[Retry] Backend unhealthy, waiting before retry...`);
+            }
+
+            // Exponential backoff: 2s, 4s, 8s
+            const delay = 1000 * Math.pow(2, attempt);
+            console.log(`[Retry] Waiting ${delay}ms before retry...`);
+            await sleep(delay);
+        }
+    }
+
+    throw lastError;
+}
+
 // Message handler
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log('[Simple Page Saver] Received message:', request.action);
 
-    if (request.action === 'EXTRACT_SINGLE_PAGE') {
+    if (request.action === 'GET_CONNECTION_STATE') {
+        // Return current connection state
+        sendResponse({
+            success: true,
+            state: {
+                isConnected: connectionState.isConnected,
+                lastSuccessfulPing: connectionState.lastSuccessfulPing,
+                consecutiveFailures: connectionState.consecutiveFailures,
+                aiEnabled: connectionState.aiEnabled
+            }
+        });
+        return false;
+    } else if (request.action === 'EXTRACT_SINGLE_PAGE') {
         handleExtractSinglePage(request.url, request.outputZip, request.downloadOptions)
             .then(response => {
                 console.log('[Simple Page Saver] Extract complete:', response);
@@ -520,32 +653,49 @@ async function extractPageData(tabId) {
     return results[0].result;
 }
 
-// Check if backend is running
+// Check if backend is running (with retry and user notification)
 async function checkBackendHealth() {
     try {
-        const storage = await chrome.storage.local.get(['apiEndpoint']);
-        const apiUrl = storage.apiEndpoint || API_BASE_URL;
+        // Try with retry logic
+        await retryWithBackoff(async () => {
+            const storage = await chrome.storage.local.get(['apiEndpoint']);
+            const apiUrl = storage.apiEndpoint || API_BASE_URL;
 
-        const response = await fetch(`${apiUrl}/`, {
-            method: 'GET',
-            signal: AbortSignal.timeout(5000) // 5 second timeout
-        });
+            const response = await fetch(`${apiUrl}/`, {
+                method: 'GET',
+                signal: AbortSignal.timeout(5000)
+            });
 
-        if (response.ok) {
+            if (!response.ok) {
+                throw new Error('Backend responded with error');
+            }
+
             const data = await response.json();
-            return { healthy: true, aiEnabled: data.ai_enabled };
-        }
-        return { healthy: false, error: 'Backend responded with error' };
+
+            // Update connection state
+            connectionState.isConnected = true;
+            connectionState.lastSuccessfulPing = Date.now();
+            connectionState.consecutiveFailures = 0;
+            connectionState.aiEnabled = data.ai_enabled;
+
+            return data;
+        }, 'Backend Health Check', 2); // Only 2 retries for interactive operations
+
+        return { healthy: true, aiEnabled: connectionState.aiEnabled };
     } catch (error) {
-        console.error('[Backend] Health check failed:', error);
+        console.error('[Backend] Health check failed after retries:', error);
+
+        // Update connection state
+        connectionState.isConnected = false;
+
         return {
             healthy: false,
-            error: 'Backend server is not running. Please start the backend server first.\n\nRun: python launcher.py\nor: SimplePageSaver.exe'
+            error: 'Backend server is not responding. Please ensure the backend is running.\n\nRun: python launcher.py\nor: SimplePageSaver.exe'
         };
     }
 }
 
-// Process HTML with backend
+// Process HTML with backend (with retry logic)
 async function processWithBackend(url, html, title) {
     // Get API URL, AI setting, and custom prompt from chrome.storage
     const storage = await chrome.storage.local.get(['apiEndpoint', 'enableAI', 'customPrompt']);
@@ -560,42 +710,56 @@ async function processWithBackend(url, html, title) {
     }
     console.log('[Backend] Sending request to /process-html');
 
-    try {
-        const response = await fetch(`${apiUrl}/process-html`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                url,
-                html,
-                title,
-                use_ai: enableAI,  // Pass AI preference to backend
-                custom_prompt: customPrompt  // Pass custom AI instructions
-            }),
-            signal: AbortSignal.timeout(120000) // 120 second timeout for large pages
-        });
+    // Wrap fetch in retry logic
+    return await retryWithBackoff(async () => {
+        try {
+            const response = await fetch(`${apiUrl}/process-html`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    url,
+                    html,
+                    title,
+                    use_ai: enableAI,
+                    custom_prompt: customPrompt
+                }),
+                signal: AbortSignal.timeout(120000) // 120 second timeout for large pages
+            });
 
-        console.log('[Backend] Response status:', response.status);
+            console.log('[Backend] Response status:', response.status);
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('[Backend] Error response:', errorText);
-            throw new Error(`Backend error: ${response.status} ${response.statusText}`);
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('[Backend] Error response:', errorText);
+                throw new Error(`Backend error: ${response.status} ${response.statusText}`);
+            }
+
+            const result = await response.json();
+
+            // Update connection state on success
+            connectionState.isConnected = true;
+            connectionState.lastSuccessfulPing = Date.now();
+
+            return result;
+        } catch (error) {
+            // Mark connection as potentially unhealthy
+            if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                connectionState.isConnected = false;
+            }
+
+            if (error.name === 'TimeoutError') {
+                throw new Error('Backend request timed out. The page may be too large.');
+            } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                throw new Error('Cannot connect to backend server. Retrying...');
+            }
+            throw error;
         }
-
-        return await response.json();
-    } catch (error) {
-        if (error.name === 'TimeoutError') {
-            throw new Error('Backend request timed out. The page may be too large.');
-        } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
-            throw new Error('Cannot connect to backend server. Please start the backend:\n\nRun: python launcher.py\nor: SimplePageSaver.exe');
-        }
-        throw error;
-    }
+    }, 'Process HTML', 3); // 3 retries for processing
 }
 
-// Extract links using backend
+// Extract links using backend (with retry logic)
 async function extractLinks(html, baseUrl) {
     // Get API URL from chrome.storage (service workers can't use localStorage)
     const storage = await chrome.storage.local.get(['apiEndpoint']);
@@ -603,21 +767,31 @@ async function extractLinks(html, baseUrl) {
 
     console.log('[Backend] Extracting links from:', baseUrl);
 
-    const response = await fetch(`${apiUrl}/extract-links`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ html, base_url: baseUrl })
-    });
+    // Wrap fetch in retry logic
+    return await retryWithBackoff(async () => {
+        const response = await fetch(`${apiUrl}/extract-links`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ html, base_url: baseUrl }),
+            signal: AbortSignal.timeout(30000) // 30 second timeout for link extraction
+        });
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[Backend] Link extraction error:', errorText);
-        throw new Error(`Backend error: ${response.status}`);
-    }
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[Backend] Link extraction error:', errorText);
+            throw new Error(`Backend error: ${response.status}`);
+        }
 
-    return await response.json();
+        const result = await response.json();
+
+        // Update connection state on success
+        connectionState.isConnected = true;
+        connectionState.lastSuccessfulPing = Date.now();
+
+        return result;
+    }, 'Extract Links', 3); // 3 retries for link extraction
 }
 
 // Download file

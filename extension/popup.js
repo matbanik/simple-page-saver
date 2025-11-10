@@ -14,6 +14,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentTab = tabs[0];
     console.log('[Popup] Current tab:', currentTab?.url);
 
+    // Check connection state
+    updateConnectionStatus();
+
     // Set up event listeners
     document.getElementById('extract-current').addEventListener('click', extractCurrentPage);
     document.getElementById('map-site').addEventListener('click', mapSite);
@@ -74,6 +77,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     console.log('[Popup] Initialization complete');
+
+    // Update connection status periodically
+    setInterval(updateConnectionStatus, 10000); // Every 10 seconds
 });
 
 // Extract current page
@@ -567,5 +573,53 @@ async function testFallback() {
     } catch (error) {
         console.error('[Test] Fallback test failed:', error);
         showStatus(`✗ Fallback Test Error: ${error.message}`, 'error');
+    }
+}
+
+// Update connection status indicator
+async function updateConnectionStatus() {
+    try {
+        const response = await chrome.runtime.sendMessage({ action: 'GET_CONNECTION_STATE' });
+
+        if (response && response.success) {
+            const state = response.state;
+            const statusDiv = document.getElementById('connection-status');
+            const statusText = document.getElementById('connection-text');
+            const statusDot = statusDiv.querySelector('.status-dot');
+
+            if (state.isConnected) {
+                statusDiv.className = 'connected';
+                statusDot.className = 'status-dot green';
+
+                let text = '✓ Backend connected';
+                if (state.aiEnabled) {
+                    text += ' (AI enabled)';
+                } else {
+                    text += ' (Fallback mode)';
+                }
+
+                // Show time since last ping
+                if (state.lastSuccessfulPing) {
+                    const secondsAgo = Math.floor((Date.now() - state.lastSuccessfulPing) / 1000);
+                    if (secondsAgo < 60) {
+                        text += ` • ${secondsAgo}s ago`;
+                    }
+                }
+
+                statusText.textContent = text;
+            } else {
+                statusDiv.className = 'disconnected';
+                statusDot.className = 'status-dot red';
+
+                let text = '✗ Backend disconnected';
+                if (state.consecutiveFailures > 0) {
+                    text += ` (${state.consecutiveFailures} failures)`;
+                }
+
+                statusText.textContent = text;
+            }
+        }
+    } catch (error) {
+        console.warn('[Popup] Could not get connection state:', error);
     }
 }

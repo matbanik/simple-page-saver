@@ -223,10 +223,65 @@
         .settings-link:hover {
             text-decoration: underline;
         }
+
+        #connection-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            padding: 6px 10px;
+            background: #f9f9f9;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            border: 1px solid #e0e0e0;
+        }
+
+        #connection-status.connected {
+            background: #e8f5e9;
+            border-color: #4CAF50;
+            color: #2e7d32;
+        }
+
+        #connection-status.disconnected {
+            background: #ffebee;
+            border-color: #f44336;
+            color: #c62828;
+        }
+
+        #connection-status.checking {
+            background: #fff3e0;
+            border-color: #ff9800;
+            color: #e65100;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-dot.green {
+            background: #4CAF50;
+        }
+
+        .status-dot.red {
+            background: #f44336;
+        }
+
+        .status-dot.orange {
+            background: #ff9800;
+        }
     </style>
 </head>
 <body>
     <h1>🗂️ Simple Page Saver</h1>
+
+    <!-- Connection Status Indicator -->
+    <div id="connection-status" class="checking">
+        <span class="status-dot orange"></span>
+        <span id="connection-text">Checking backend...</span>
+    </div>
 
     <div class="section">
         <div class="section-title">⚙️ Settings</div>
