@@ -74,12 +74,49 @@ Integrated logging and settings management.
 - Masks API keys in all output
 - Accepts `custom_prompt` parameter for AI customization
 
-### 5. Build System
+### 5. Unified Launcher with Command-Line Support
+Single entry point supporting both GUI and server modes via command-line arguments.
+
+**File**: `backend/launcher.py`
+
+**Features**:
+- Default mode: Start server directly
+- GUI mode: Launch management interface with `-gui` flag
+- Port override: Specify custom port with `-p` or `--port`
+- Log level override: Set log level with `--log-level`
+- Help system: Show all options with `--help`
+
+**Command-Line Options**:
+```powershell
+# Start server directly (default)
+SimplePageSaver.exe
+
+# Launch management GUI
+SimplePageSaver.exe -gui
+SimplePageSaver.exe --gui
+
+# Start server on custom port
+SimplePageSaver.exe -p 8080
+SimplePageSaver.exe --port 8080
+
+# Override log level
+SimplePageSaver.exe --log-level DEBUG
+
+# Show help
+SimplePageSaver.exe --help
+```
+
+**Convenience Launchers**:
+- `start_gui.bat` - Double-click to launch GUI
+- `start_server.bat` - Double-click to start server
+
+### 6. Build System
 PyInstaller-based executable builder.
 
 **Files**:
 - `backend/build.py` - Python build script
 - `backend/build.ps1` - PowerShell wrapper
+- `backend/launcher.py` - Unified entry point
 
 **How to Build**:
 ```powershell
@@ -87,9 +124,9 @@ cd backend
 .\build.ps1
 ```
 
-Output: `dist/SimplePageSaver.exe`
+Output: `dist/SimplePageSaver.exe` (single executable, ~40-50MB)
 
-### 6. Extension Reload Script
+### 7. Extension Reload Script
 Automated extension reload helper.
 
 **File**: `reload_extension.ps1`
@@ -101,7 +138,7 @@ Automated extension reload helper.
 
 **Note**: Chrome doesn't support full automation of extension reload. The script provides instructions and opens chrome://extensions/ for manual reload.
 
-### 7. Custom AI Prompt Instructions (Extension)
+### 8. Custom AI Prompt Instructions (Extension)
 Add custom instructions to AI processing with preset templates.
 
 **Modified Files**:
@@ -186,6 +223,61 @@ git pull
 **Stopping Server**:
 1. Click "Stop Server"
 2. GUI finds process by port and terminates it
+
+### Command-Line Usage (Executable)
+
+**Start Server Directly** (default behavior):
+```powershell
+# Using executable
+SimplePageSaver.exe
+
+# Or with Python
+python launcher.py
+```
+
+**Launch Management GUI**:
+```powershell
+# Using executable
+SimplePageSaver.exe -gui
+
+# Or double-click
+start_gui.bat
+
+# Or with Python
+python launcher.py -gui
+```
+
+**Start on Custom Port**:
+```powershell
+# Start server on port 8080
+SimplePageSaver.exe -p 8080
+
+# Start server on port 9000
+SimplePageSaver.exe --port 9000
+```
+
+**Override Log Level**:
+```powershell
+# Debug mode (very verbose)
+SimplePageSaver.exe --log-level DEBUG
+
+# Error only
+SimplePageSaver.exe --log-level ERROR
+```
+
+**Combine Options**:
+```powershell
+# Custom port + debug logging
+SimplePageSaver.exe -p 8080 --log-level DEBUG
+
+# GUI with pre-configured settings
+SimplePageSaver.exe -gui
+```
+
+**Get Help**:
+```powershell
+SimplePageSaver.exe --help
+```
 
 ### Custom AI Prompts
 

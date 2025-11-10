@@ -17,13 +17,14 @@ if build_dir.exists():
     shutil.rmtree(build_dir)
 
 print("Building Simple Page Saver Backend executable...")
+print("Entry point: launcher.py (supports both GUI and server modes)")
 
 # PyInstaller configuration
 PyInstaller.__main__.run([
-    'gui.py',  # Main entry point
+    'launcher.py',  # Main entry point (supports command-line args)
     '--name=SimplePageSaver',
     '--onefile',  # Single executable
-    '--windowed',  # No console window for GUI
+    '--console',  # Keep console for server mode and command-line args
     '--add-data=settings.json;.' if Path('settings.json').exists() else '--add-data=.env.example;.',
     '--hidden-import=uvicorn',
     '--hidden-import=uvicorn.logging',
@@ -43,6 +44,15 @@ PyInstaller.__main__.run([
     '--icon=NONE',  # Add your icon path here if you have one
 ])
 
-print("\nBuild complete!")
+print("\n" + "=" * 60)
+print("Build complete!")
+print("=" * 60)
 print(f"Executable location: {dist_dir / 'SimplePageSaver.exe'}")
-print("\nYou can now run the executable to start the GUI.")
+print()
+print("Usage:")
+print("  SimplePageSaver.exe              Start server directly (default)")
+print("  SimplePageSaver.exe -gui         Launch management GUI")
+print("  SimplePageSaver.exe --gui        Launch management GUI")
+print("  SimplePageSaver.exe -p 8080      Start server on port 8080")
+print("  SimplePageSaver.exe --help       Show all options")
+print("=" * 60)
