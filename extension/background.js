@@ -15,7 +15,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log('[Simple Page Saver] Received message:', request.action);
 
     if (request.action === 'EXTRACT_SINGLE_PAGE') {
-        handleExtractSinglePage(request.url, request.outputZip)
+        handleExtractSinglePage(request.url, request.outputZip, request.downloadOptions)
             .then(response => {
                 console.log('[Simple Page Saver] Extract complete:', response);
                 sendResponse(response);
@@ -62,9 +62,19 @@ function showNotification(title, message, type = 'basic') {
 }
 
 // Extract a single page
-async function handleExtractSinglePage(url, outputZip = false) {
+async function handleExtractSinglePage(url, outputZip = false, downloadOptions = null) {
+    // Default download options if not provided (backward compatibility)
+    if (!downloadOptions) {
+        downloadOptions = {
+            content: true,
+            mediaLinks: false,
+            externalLinks: false
+        };
+    }
+
     console.log('[Extract] Starting extraction for:', url);
     console.log('[Extract] Output as ZIP:', outputZip);
+    console.log('[Extract] Download options:', downloadOptions);
 
     // Check backend health first
     const health = await checkBackendHealth();
@@ -98,30 +108,100 @@ async function handleExtractSinglePage(url, outputZip = false) {
         const pageData = await extractPageData(tab.id);
         console.log('[Extract] HTML extracted, size:', pageData.html.length, 'chars');
 
-        // Send to backend for processing
-        console.log('[Extract] Sending to backend...');
-        const result = await processWithBackend(url, pageData.html, pageData.title);
-        console.log('[Extract] Backend response received:', result.filename);
+        let result = null;
+        let externalLinks = [];
 
-        // Download based on user preference
-        if (outputZip) {
-            // Create ZIP file with markdown and media links
-            console.log('[Extract] Creating ZIP file...');
-            await createAndDownloadZip([result], result.media_urls || []);
-            showNotification('Extraction Complete', `Saved as ZIP: ${result.filename}\nWords: ${result.word_count}\nAI: ${result.used_ai ? 'Yes' : 'No'}`);
-        } else {
-            // Download individual files
-            console.log('[Extract] Downloading markdown file...');
-            await downloadFile(result.markdown, result.filename);
+        // Process with backend if content is requested
+        if (downloadOptions.content) {
+            console.log('[Extract] Sending to backend for processing...');
+            result = await processWithBackend(url, pageData.html, pageData.title);
+            console.log('[Extract] Backend response received:', result.filename);
+        }
 
-            // If there are media links, create media_links.txt
-            if (result.media_urls && result.media_urls.length > 0) {
-                console.log('[Extract] Downloading media links file...');
-                const mediaContent = result.media_urls.join('\n');
-                await downloadFile(mediaContent, 'media_links.txt');
+        // Extract links if media or external links requested
+        if (downloadOptions.mediaLinks || downloadOptions.externalLinks) {
+            console.log('[Extract] Extracting links from page...');
+            const links = await extractLinks(pageData.html, url);
+            console.log('[Extract] Links extracted:', {
+                internal: links.internal_links.length,
+                external: links.external_links.length,
+                media: links.media_links.length
+            });
+
+            if (downloadOptions.externalLinks) {
+                externalLinks = links.external_links;
             }
 
-            showNotification('Extraction Complete', `Saved: ${result.filename}\nWords: ${result.word_count}\nAI: ${result.used_ai ? 'Yes' : 'No'}`);
+            // Override media URLs if explicitly requested
+            if (downloadOptions.mediaLinks && result) {
+                result.media_urls = links.media_links;
+            } else if (downloadOptions.mediaLinks && !result) {
+                // Create minimal result object for media links only
+                result = {
+                    media_urls: links.media_links,
+                    filename: 'media_links.txt'
+                };
+            }
+        }
+
+        // Prepare files for download
+        const filesToDownload = [];
+
+        if (downloadOptions.content && result && result.markdown) {
+            filesToDownload.push({
+                content: result.markdown,
+                filename: result.filename
+            });
+        }
+
+        if (downloadOptions.mediaLinks && result && result.media_urls && result.media_urls.length > 0) {
+            filesToDownload.push({
+                content: result.media_urls.join('\n'),
+                filename: 'media_links.txt'
+            });
+        }
+
+        if (downloadOptions.externalLinks && externalLinks.length > 0) {
+            filesToDownload.push({
+                content: externalLinks.join('\n'),
+                filename: 'external_links.txt'
+            });
+        }
+
+        // Download based on ZIP preference
+        if (outputZip && filesToDownload.length > 0) {
+            // Create ZIP file with selected files
+            console.log('[Extract] Creating ZIP file with', filesToDownload.length, 'files...');
+            const zip = new JSZip();
+            filesToDownload.forEach(file => {
+                zip.file(file.filename, file.content);
+            });
+
+            const blob = await zip.generateAsync({type: 'blob', compression: 'DEFLATE'});
+            const reader = new FileReader();
+            const dataUrl = await new Promise((resolve, reject) => {
+                reader.onloadend = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
+            const zipFilename = `page_extract_${timestamp}.zip`;
+            await chrome.downloads.download({
+                url: dataUrl,
+                filename: zipFilename,
+                saveAs: false
+            });
+
+            showNotification('Extraction Complete', `Saved as ZIP: ${zipFilename}\n${filesToDownload.length} files included`);
+        } else {
+            // Download individual files
+            for (const file of filesToDownload) {
+                console.log('[Extract] Downloading:', file.filename);
+                await downloadFile(file.content, file.filename);
+            }
+
+            showNotification('Extraction Complete', `Downloaded ${filesToDownload.length} file(s)`);
         }
 
         // Close the tab after processing is complete (don't block on errors)
@@ -137,9 +217,9 @@ async function handleExtractSinglePage(url, outputZip = false) {
 
         return {
             success: true,
-            filename: result.filename,
-            wordCount: result.word_count,
-            usedAI: result.used_ai
+            filename: result?.filename || 'links',
+            wordCount: result?.word_count || 0,
+            usedAI: result?.used_ai || false
         };
     } catch (error) {
         console.error('[Extract] Error:', error);

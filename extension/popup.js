@@ -85,14 +85,29 @@ async function extractCurrentPage() {
         showStatus('Extracting current page...', 'info');
         disableButtons(true);
 
-        // Check if ZIP option is selected
+        // Get download options
+        const downloadContent = document.getElementById('download-content').checked;
+        const downloadMediaLinks = document.getElementById('download-media-links').checked;
+        const downloadExternalLinks = document.getElementById('download-external-links').checked;
         const useZip = document.getElementById('single-page-zip').checked;
+
+        // Validate at least one option selected
+        if (!downloadContent && !downloadMediaLinks && !downloadExternalLinks) {
+            showStatus('Please select at least one download option', 'error');
+            disableButtons(false);
+            return;
+        }
 
         // Send message to background worker
         const response = await chrome.runtime.sendMessage({
             action: 'EXTRACT_SINGLE_PAGE',
             url: currentTab.url,
-            outputZip: useZip
+            outputZip: useZip,
+            downloadOptions: {
+                content: downloadContent,
+                mediaLinks: downloadMediaLinks,
+                externalLinks: downloadExternalLinks
+            }
         });
 
         console.log('[Popup] Response received:', response);
