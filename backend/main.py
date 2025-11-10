@@ -1,6 +1,6 @@
 """
 FastAPI Backend for Simple Page Saver
-Main application with REST API endpoints
+Main application with REST API endpoints, logging, and settings management
 """
 
 from fastapi import FastAPI, HTTPException
@@ -8,13 +8,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 import os
-from dotenv import load_dotenv
 import re
 
 from preprocessing import HTMLPreprocessor, estimate_tokens
 from ai_converter import AIConverter, estimate_cost
+from settings_manager import SettingsManager
+from logging_config import setup_logging, log_ai_request, log_ai_response
 
-load_dotenv()
+# Initialize settings and logging
+settings = SettingsManager()
+logger = setup_logging(log_level=settings.get('log_level', 'INFO'))
+
+# Export settings as environment variables for compatibility
+env_vars = settings.export_for_env()
+for key, value in env_vars.items():
+    os.environ[key] = value
+
+logger.info("=== Simple Page Saver Backend Starting ===")
+logger.info(f"Server Port: {settings.get('server_port')}")
+logger.info(f"Default Model: {settings.get('default_model')}")
+logger.info(f"Log Level: {settings.get('log_level')}")
+logger.info(f"API Key Configured: {bool(settings.get_api_key())}")
 
 app = FastAPI(
     title="Simple Page Saver API",
@@ -25,7 +39,7 @@ app = FastAPI(
 # Enable CORS for Chrome extension
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify extension ID
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -33,7 +47,10 @@ app.add_middleware(
 
 # Initialize processors
 preprocessor = HTMLPreprocessor()
-converter = AIConverter()
+converter = AIConverter(
+    api_key=settings.get_api_key(),
+    model=settings.get('default_model')
+)
 
 
 # Request/Response Models
@@ -41,7 +58,8 @@ class ProcessHTMLRequest(BaseModel):
     url: str
     html: str
     title: Optional[str] = ""
-    use_ai: Optional[bool] = True  # Default to True for backward compatibility
+    use_ai: Optional[bool] = True
+    custom_prompt: Optional[str] = ""
 
 
 class ProcessHTMLResponse(BaseModel):
@@ -83,11 +101,12 @@ class EstimateCostResponse(BaseModel):
 @app.get("/")
 async def health_check():
     """Health check endpoint"""
+    logger.debug("Health check requested")
     return {
         "status": "healthy",
         "service": "Simple Page Saver API",
         "version": "1.0.0",
-        "ai_enabled": bool(os.getenv('OPENROUTER_API_KEY'))
+        "ai_enabled": bool(settings.get_api_key())
     }
 
 
@@ -97,34 +116,57 @@ async def process_html(request: ProcessHTMLRequest):
     Main processing endpoint: preprocess HTML and convert to markdown
     """
     try:
+        logger.info(f"Processing request for URL: {request.url}")
+        logger.debug(f"HTML size: {len(request.html)} chars, use_ai: {request.use_ai}")
+
         # Step 1: Preprocess HTML
         cleaned_html, prep_metadata = preprocessor.preprocess(request.html, request.url)
+        logger.info(f"Preprocessing complete - reduced from {prep_metadata['original_size']} to {prep_metadata['final_size']} chars ({prep_metadata.get('reduction_percentage', 0)}% reduction)")
 
         # Step 2: Estimate tokens
         token_count = estimate_tokens(cleaned_html)
         prep_metadata['estimated_tokens'] = token_count
+        logger.debug(f"Estimated tokens: {token_count}")
 
         # Step 3: Extract media links
         links_data = preprocessor.extract_links(request.html, request.url)
         media_urls = links_data['media_links']
+        logger.debug(f"Extracted {len(media_urls)} media URLs")
 
         # Step 4: Convert to markdown (with chunking if needed)
-        # Force fallback if use_ai is False
         if not request.use_ai:
-            print(f"[API] AI disabled by user, using fallback for: {request.url}")
+            logger.info("AI disabled by user, using fallback")
+            log_ai_request(logger, "fallback", len(cleaned_html), {})
             markdown = converter._convert_with_html2text(cleaned_html, request.title)
             used_ai = False
             error = "AI disabled by user"
-        elif token_count > 20000:  # ~80K characters
-            markdown, used_ai, error = converter.convert_large_html(cleaned_html, request.title)
+            log_ai_response(logger, "fallback", len(markdown), False, error)
+        elif token_count > 20000:
+            logger.warning(f"Large content ({token_count} tokens), using chunking")
+            metadata_extra = {'chunked': True}
+            if request.custom_prompt:
+                metadata_extra['custom_prompt'] = True
+                logger.info(f"Using custom prompt (length: {len(request.custom_prompt)} chars)")
+            log_ai_request(logger, settings.get('default_model'), len(cleaned_html), metadata_extra)
+            markdown, used_ai, error = converter.convert_large_html(cleaned_html, request.title, request.custom_prompt)
+            log_ai_response(logger, settings.get('default_model'), len(markdown), used_ai, error)
         else:
-            markdown, used_ai, error = converter.convert_to_markdown(cleaned_html, request.title)
+            metadata_extra = {}
+            if request.custom_prompt:
+                metadata_extra['custom_prompt'] = True
+                logger.info(f"Using custom prompt (length: {len(request.custom_prompt)} chars)")
+            log_ai_request(logger, settings.get('default_model'), len(cleaned_html), metadata_extra)
+            markdown, used_ai, error = converter.convert_to_markdown(cleaned_html, request.title, request.custom_prompt)
+            log_ai_response(logger, settings.get('default_model'), len(markdown), used_ai, error)
 
         # Step 5: Generate filename from title or URL
         filename = _generate_filename(request.title or request.url)
+        logger.debug(f"Generated filename: {filename}")
 
         # Step 6: Count words in markdown
         word_count = len(re.findall(r'\w+', markdown))
+
+        logger.info(f"Processing complete - {word_count} words, AI used: {used_ai}")
 
         return ProcessHTMLResponse(
             markdown=markdown,
@@ -138,6 +180,7 @@ async def process_html(request: ProcessHTMLRequest):
         )
 
     except Exception as e:
+        logger.error(f"Error processing HTML: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -147,7 +190,10 @@ async def extract_links(request: ExtractLinksRequest):
     Extract and categorize links from HTML
     """
     try:
+        logger.info(f"Extracting links from: {request.base_url}")
         links_data = preprocessor.extract_links(request.html, request.base_url)
+
+        logger.info(f"Links extracted - Internal: {len(links_data['internal_links'])}, External: {len(links_data['external_links'])}, Media: {len(links_data['media_links'])}")
 
         return ExtractLinksResponse(
             internal_links=links_data['internal_links'],
@@ -157,6 +203,7 @@ async def extract_links(request: ExtractLinksRequest):
         )
 
     except Exception as e:
+        logger.error(f"Error extracting links: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -166,27 +213,25 @@ async def estimate_cost_endpoint(request: EstimateCostRequest):
     Estimate the cost of processing HTML with AI
     """
     try:
+        logger.debug("Cost estimation requested")
         # Preprocess first to get realistic token count
         cleaned_html, _ = preprocessor.preprocess(request.html)
 
-        model = request.model or os.getenv('DEFAULT_MODEL', 'deepseek/deepseek-chat')
+        model = request.model or settings.get('default_model')
         cost_data = estimate_cost(cleaned_html, model)
+
+        logger.debug(f"Cost estimate: ${cost_data['estimated_cost_usd']} for model {model}")
 
         return EstimateCostResponse(**cost_data)
 
     except Exception as e:
+        logger.error(f"Error estimating cost: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 def _generate_filename(text: str) -> str:
     """
     Generate a valid filename from title or URL
-
-    Args:
-        text: Title or URL string
-
-    Returns:
-        Valid filename string
     """
     # Remove protocol and domain if it's a URL
     if text.startswith(('http://', 'https://')):
@@ -218,24 +263,21 @@ def _generate_filename(text: str) -> str:
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.getenv('SERVER_PORT', '8077'))
+    port = settings.get('server_port', 8077)
 
-    print(f"""
-    ╔═══════════════════════════════════════════════════╗
-    ║      Simple Page Saver API Server                ║
-    ╚═══════════════════════════════════════════════════╝
-
-    🚀 Server starting on http://localhost:{port}
-    📝 API Documentation: http://localhost:{port}/docs
-    🔑 AI Enabled: {bool(os.getenv('OPENROUTER_API_KEY'))}
-
-    Press CTRL+C to stop the server
-    """)
+    logger.info("=" * 50)
+    logger.info("  Simple Page Saver API Server")
+    logger.info("=" * 50)
+    logger.info(f"Server starting on http://localhost:{port}")
+    logger.info(f"API Documentation: http://localhost:{port}/docs")
+    logger.info(f"AI Enabled: {bool(settings.get_api_key())}")
+    logger.info("Press CTRL+C to stop the server")
+    logger.info("=" * 50)
 
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=port,
-        reload=True,
-        log_level="info"
+        reload=False,
+        log_level=settings.get('log_level', 'INFO').lower()
     )

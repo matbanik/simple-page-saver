@@ -131,7 +131,7 @@ def launch_server(port=None, log_level=None):
         print()
 
         # Import and run the application
-        from main_updated import app
+        from main import app
 
         uvicorn.run(
             app,
