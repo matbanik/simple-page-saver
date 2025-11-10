@@ -299,11 +299,15 @@
         <div id="url-list"></div>
 
         <div style="margin-top: 8px; display: none;" id="extraction-controls">
-            <label>
-                <input type="checkbox" id="output-zip" checked>
-                Download as ZIP
+            <label style="display: block; margin-bottom: 4px;">
+                <input type="checkbox" id="merge-into-single">
+                <span>Merge into single file</span>
             </label>
-            <button id="extract-selected" class="btn-primary" style="margin-top: 8px; width: 100%;">
+            <label style="display: block; margin-bottom: 8px;">
+                <input type="checkbox" id="output-zip" checked>
+                <span>Download as ZIP</span>
+            </label>
+            <button id="extract-selected" class="btn-primary" style="margin-top: 4px; width: 100%;">
                 Extract Selected Pages
             </button>
         </div>

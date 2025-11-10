@@ -230,6 +230,7 @@ async function extractSelectedPages() {
         }
 
         const outputZip = document.getElementById('output-zip').checked;
+        const mergeIntoSingle = document.getElementById('merge-into-single').checked;
 
         showStatus(`Extracting ${selectedUrls.length} pages...`, 'info');
         disableButtons(true);
@@ -239,7 +240,8 @@ async function extractSelectedPages() {
         const response = await chrome.runtime.sendMessage({
             action: 'EXTRACT_MULTIPLE_PAGES',
             urls: selectedUrls,
-            outputZip: outputZip
+            outputZip: outputZip,
+            mergeIntoSingle: mergeIntoSingle
         });
 
         if (response.success) {

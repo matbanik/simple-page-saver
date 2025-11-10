@@ -37,7 +37,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
         return true;
     } else if (request.action === 'EXTRACT_MULTIPLE_PAGES') {
-        handleExtractMultiplePages(request.urls, request.outputZip)
+        handleExtractMultiplePages(request.urls, request.outputZip, request.mergeIntoSingle)
             .then(response => {
                 console.log('[Simple Page Saver] Multi-extract complete:', response);
                 sendResponse(response);
@@ -252,7 +252,7 @@ async function handleMapSite(startUrl, depth) {
 }
 
 // Extract multiple pages
-async function handleExtractMultiplePages(urls, outputZip) {
+async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = false) {
     // Check backend health first
     const health = await checkBackendHealth();
     if (!health.healthy) {
@@ -288,6 +288,8 @@ async function handleExtractMultiplePages(urls, outputZip) {
                 // Process with backend
                 const result = await processWithBackend(url, pageData.html, pageData.title);
 
+                // Add source URL to result for merged output
+                result.sourceUrl = url;
                 results.push(result);
 
                 // Collect media URLs
@@ -321,23 +323,46 @@ async function handleExtractMultiplePages(urls, outputZip) {
         }
 
         // Download results
-        if (outputZip) {
-            // Create ZIP file
-            await createAndDownloadZip(results, Array.from(allMediaUrls));
-            showNotification('Batch Extraction Complete', `Extracted ${results.length} pages into ZIP file`);
+        if (mergeIntoSingle) {
+            // Merge all markdown content into single file
+            const mergedContent = createMergedMarkdown(results, Array.from(allMediaUrls));
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
+            const mergedFilename = `merged_pages_${results.length}_${timestamp}.md`;
+
+            if (outputZip) {
+                // Create ZIP with single merged file
+                await createAndDownloadZip([{ markdown: mergedContent, filename: mergedFilename }], Array.from(allMediaUrls));
+                showNotification('Batch Extraction Complete', `Merged ${results.length} pages into single file in ZIP`);
+            } else {
+                // Download single merged file
+                await downloadFile(mergedContent, mergedFilename);
+                // Download media links file
+                if (allMediaUrls.size > 0) {
+                    const mediaContent = Array.from(allMediaUrls).join('\n');
+                    await downloadFile(mediaContent, 'media_links.txt');
+                }
+                showNotification('Batch Extraction Complete', `Merged ${results.length} pages into single file`);
+            }
         } else {
-            // Download individual files
-            for (const result of results) {
-                await downloadFile(result.markdown, result.filename);
-            }
+            // Original behavior: individual files or ZIP with multiple files
+            if (outputZip) {
+                // Create ZIP file
+                await createAndDownloadZip(results, Array.from(allMediaUrls));
+                showNotification('Batch Extraction Complete', `Extracted ${results.length} pages into ZIP file`);
+            } else {
+                // Download individual files
+                for (const result of results) {
+                    await downloadFile(result.markdown, result.filename);
+                }
 
-            // Download media links file
-            if (allMediaUrls.size > 0) {
-                const mediaContent = Array.from(allMediaUrls).join('\n');
-                await downloadFile(mediaContent, 'media_links.txt');
-            }
+                // Download media links file
+                if (allMediaUrls.size > 0) {
+                    const mediaContent = Array.from(allMediaUrls).join('\n');
+                    await downloadFile(mediaContent, 'media_links.txt');
+                }
 
-            showNotification('Batch Extraction Complete', `Extracted ${results.length} pages as individual files`);
+                showNotification('Batch Extraction Complete', `Extracted ${results.length} pages as individual files`);
+            }
         }
 
         return {
@@ -352,6 +377,51 @@ async function handleExtractMultiplePages(urls, outputZip) {
             error: error.message
         };
     }
+}
+
+// Create merged markdown from multiple results
+function createMergedMarkdown(results, mediaUrls) {
+    const timestamp = new Date().toISOString();
+    const parts = [];
+
+    // Add header
+    parts.push(`# Merged Page Extraction\n`);
+    parts.push(`**Extracted:** ${timestamp}`);
+    parts.push(`**Total Pages:** ${results.length}\n`);
+    parts.push(`---\n`);
+
+    // Add table of contents
+    parts.push(`## Table of Contents\n`);
+    results.forEach((result, index) => {
+        const anchor = `page-${index + 1}`;
+        const title = result.filename.replace('.md', '');
+        parts.push(`${index + 1}. [${title}](#${anchor})`);
+    });
+    parts.push(`\n---\n`);
+
+    // Add each page's content
+    results.forEach((result, index) => {
+        const anchor = `page-${index + 1}`;
+        parts.push(`\n## <a name="${anchor}"></a>Page ${index + 1}: ${result.filename.replace('.md', '')}\n`);
+        if (result.sourceUrl) {
+            parts.push(`**Source:** ${result.sourceUrl}`);
+        }
+        parts.push(`**Words:** ${result.word_count || 'N/A'}`);
+        parts.push(`**AI Used:** ${result.used_ai ? 'Yes' : 'No'}\n`);
+        parts.push(result.markdown);
+        parts.push(`\n---\n`);
+    });
+
+    // Add media links section if any
+    if (mediaUrls.length > 0) {
+        parts.push(`\n## Media Links\n`);
+        parts.push(`Total media files found: ${mediaUrls.length}\n`);
+        mediaUrls.forEach(url => {
+            parts.push(`- ${url}`);
+        });
+    }
+
+    return parts.join('\n');
 }
 
 // Extract page data using content script
