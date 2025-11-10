@@ -41,6 +41,9 @@ PyInstaller.__main__.run([
     '--collect-all=pydantic',
     '--collect-all=bs4',
     '--collect-all=lxml',
+    '--collect-all=cryptography',
+    '--hidden-import=cryptography.hazmat.primitives.kdf.pbkdf2',
+    '--hidden-import=cryptography.hazmat.backends',
     '--icon=NONE',  # Add your icon path here if you have one
 ])
 
