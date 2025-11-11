@@ -28,6 +28,7 @@ class Job:
 
     STATUS_PENDING = 'pending'
     STATUS_PROCESSING = 'processing'
+    STATUS_PAUSED = 'paused'
     STATUS_COMPLETED = 'completed'
     STATUS_FAILED = 'failed'
 
@@ -76,6 +77,20 @@ class Job:
         self.status = self.STATUS_FAILED
         self.completed_at = datetime.now().isoformat()
         self.error = error
+
+    def pause(self):
+        """Pause the job"""
+        if self.status == self.STATUS_PROCESSING:
+            self.status = self.STATUS_PAUSED
+            return True
+        return False
+
+    def resume(self):
+        """Resume a paused job"""
+        if self.status == self.STATUS_PAUSED:
+            self.status = self.STATUS_PROCESSING
+            return True
+        return False
 
     def to_dict(self) -> dict:
         """Convert job to dictionary"""
@@ -170,6 +185,30 @@ class JobManager:
             job = self.jobs.get(job_id)
             if job:
                 job.fail(error)
+        finally:
+            self._release_lock(operation)
+
+    def pause_job(self, job_id: str) -> bool:
+        """Pause a job"""
+        operation = f"pause_job({job_id})"
+        try:
+            self._acquire_lock(operation)
+            job = self.jobs.get(job_id)
+            if job:
+                return job.pause()
+            return False
+        finally:
+            self._release_lock(operation)
+
+    def resume_job(self, job_id: str) -> bool:
+        """Resume a paused job"""
+        operation = f"resume_job({job_id})"
+        try:
+            self._acquire_lock(operation)
+            job = self.jobs.get(job_id)
+            if job:
+                return job.resume()
+            return False
         finally:
             self._release_lock(operation)
 
