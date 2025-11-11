@@ -428,14 +428,26 @@ Once you've identified the issue using diagnostics:
 
 ## Conversion Logging (NEW)
 
-**Version 2.2+** includes comprehensive logging and timeout protection for HTML conversion.
+**Version 2.3+** includes optional comprehensive logging and timeout protection for HTML conversion.
 
-**IMPORTANT**: Conversion logs are written to a **separate, standalone log file** to avoid lock conflicts with the main logging system:
-- **Log file**: `backend/logs/conversion_debug_YYYYMMDD.log`
+**IMPORTANT**: Conversion logging is **DISABLED by default** to avoid any blocking I/O issues.
+
+**To enable detailed conversion logging:**
+1. Set environment variable: `ENABLE_CONVERSION_LOGGING=true` before starting server
+2. Logs written to: `backend/logs/conversion_debug_YYYYMMDD.log`
+3. Uses non-blocking async logging (QueueHandler) to prevent hangs
+
+**Features when enabled:**
 - Independent from main logs and GUI console
-- Thread-safe and buffered to prevent blocking
+- Thread-safe and non-blocking (background thread writes)
+- Never blocks conversion process
 - Automatically created when first conversion runs
+- Safe wrapper functions that never crash on logging errors
 - Check this file to see detailed conversion progress and identify hang points
+
+**Why disabled by default:** Testing revealed that file-based logging could cause
+blocking I/O issues during conversion. The optional non-blocking logger is available
+when you need detailed debugging, but won't interfere with normal operation.
 
 ### What Gets Logged
 
