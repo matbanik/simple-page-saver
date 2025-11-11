@@ -590,16 +590,17 @@ Guidelines:
             return self.convert_to_markdown(html, title, custom_prompt)
 
         # Need to chunk - determine chunk size
-        # Target 80% of max to leave some room
+        # Target 80% of max to leave some room for variation
         target_tokens_per_chunk = int(max_input_tokens * 0.8)
 
-        # Estimate characters per chunk (rough but good enough for chunking)
-        # Average ratio from current content
-        chars_per_token = len(html) / html_tokens if html_tokens > 0 else 4
-        max_chars_per_chunk = int(target_tokens_per_chunk * chars_per_token)
+        # IMPORTANT: Use conservative character estimate to avoid token-dense content issues
+        # Real-world token density varies: 2-4 chars/token depending on content
+        # Use 2.5 chars/token to be safe (conservative)
+        CONSERVATIVE_CHARS_PER_TOKEN = 2.5
+        max_chars_per_chunk = int(target_tokens_per_chunk * CONSERVATIVE_CHARS_PER_TOKEN)
 
-        logger.info(f"[Chunking] Splitting into chunks of ~{max_chars_per_chunk} chars ({target_tokens_per_chunk} tokens)")
-        print(f"[Chunking] HTML too large ({html_tokens} tokens), splitting into chunks of ~{target_tokens_per_chunk} tokens")
+        logger.info(f"[Chunking] Target: {target_tokens_per_chunk} tokens/chunk, Max chars: {max_chars_per_chunk}")
+        print(f"[Chunking] HTML too large ({html_tokens} tokens), splitting into chunks of ~{target_tokens_per_chunk} tokens ({max_chars_per_chunk} chars)")
 
         chunks = self.chunk_html(html, max_chars=max_chars_per_chunk)
         markdown_parts = []
@@ -608,7 +609,15 @@ Guidelines:
 
         for i, chunk in enumerate(chunks):
             chunk_tokens = count_tokens(chunk, model_name)
+            logger.info(f"[Chunking] Processing chunk {i+1}/{len(chunks)}: {len(chunk)} chars, {chunk_tokens} tokens")
             print(f"Processing chunk {i+1}/{len(chunks)} ({chunk_tokens} tokens)")
+
+            # Safety check: If chunk is still too large, split it further
+            if chunk_tokens > max_input_tokens:
+                logger.error(f"[Chunking] Chunk {i+1} is STILL too large ({chunk_tokens} tokens)! Skipping...")
+                errors.append(f"Chunk {i+1}: Too large ({chunk_tokens} tokens) even after chunking")
+                continue
+
             md, ai_used, error = self.convert_to_markdown(chunk, title if i == 0 else "", custom_prompt)
             markdown_parts.append(md)
             used_ai = used_ai or ai_used
