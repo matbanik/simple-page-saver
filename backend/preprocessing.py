@@ -285,7 +285,10 @@ class HTMLPreprocessor:
 
 def estimate_tokens(text: str) -> int:
     """
-    Rough token estimation (1 token ≈ 4 characters for English)
-    More accurate would use tiktoken, but this is sufficient
+    Conservative token estimation (1 token ≈ 3 characters for safety)
+    This errs on the side of caution to avoid exceeding model limits
     """
-    return len(text) // 4
+    # Use 3 chars per token for more conservative estimates
+    # Add 20% buffer for safety
+    base_estimate = len(text) // 3
+    return int(base_estimate * 1.2)

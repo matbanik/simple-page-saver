@@ -144,6 +144,24 @@ Guidelines:
 
         user_prompt = "\n".join(user_prompt_parts)
 
+        # Validate request size before sending
+        # Conservative estimate: system prompt ~800 tokens, user prompt from chars/3, output 4000
+        from preprocessing import estimate_tokens
+        system_tokens = 800
+        user_tokens = estimate_tokens(user_prompt)
+        output_tokens = 4000
+        total_tokens = system_tokens + user_tokens + output_tokens
+
+        # Most models have 128K-256K context limits
+        # Use 240K as safe maximum to account for tokenization variations
+        MAX_CONTEXT_TOKENS = 240000
+
+        if total_tokens > MAX_CONTEXT_TOKENS:
+            raise ValueError(
+                f"Content too large: ~{total_tokens} tokens exceeds {MAX_CONTEXT_TOKENS} limit. "
+                f"Please use chunking for large content."
+            )
+
         payload = {
             "model": self.model,
             "messages": [
@@ -261,6 +279,22 @@ Guidelines:
             raise ValueError("Trafilatura extraction returned no content")
 
         logger.info(f"[Trafilatura] Extracted text length: {len(text)} chars")
+
+        # Post-process to fix spacing issues
+        # Trafilatura sometimes bunches words together without spaces
+        import re
+
+        # Add space after price/currency symbols before capital letters or other text
+        text = re.sub(r'(\$[\d,.]+)([A-Z])', r'\1 \2', text)
+
+        # Add space between lowercase and uppercase letters (camelCase boundaries)
+        text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)
+
+        # Add space between text and numbers where missing
+        text = re.sub(r'([a-zA-Z])(\d)', r'\1 \2', text)
+
+        # Add space after common button text patterns
+        text = re.sub(r'(Buy It Now|Add to Cart|Free [Ss]hipping|Free [Dd]elivery|Located in)([A-Z])', r'\1 \2', text)
 
         # Add title if provided and not already present
         if title and not text.startswith(f"# {title}"):
@@ -399,8 +433,13 @@ Guidelines:
         Returns:
             Tuple of (markdown_content, used_ai, error_message)
         """
-        # Check if chunking is needed (80K chars ≈ 20K tokens)
-        if len(html) <= 80000:
+        # Check if chunking is needed
+        # Use conservative estimate: 180K chars ≈ 60K tokens (with 20% safety buffer)
+        # Account for system prompt (~2400 chars) + custom prompt
+        system_overhead = 2400 + len(custom_prompt)
+        max_chars = 180000 - system_overhead
+
+        if len(html) <= max_chars:
             return self.convert_to_markdown(html, title, custom_prompt)
 
         chunks = self.chunk_html(html)

@@ -379,7 +379,28 @@ async function handleMapSite(startUrl, depth) {
 
     showNotification('Site Mapping', `Mapping site with depth ${depth}...`);
 
+    let jobId = null;
+
     try {
+        // Create a site mapping job
+        const storage = await chrome.storage.local.get(['apiUrl']);
+        const apiUrl = storage.apiUrl || 'http://localhost:8077';
+
+        const jobResponse = await fetch(`${apiUrl}/site-map/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                start_url: startUrl,
+                max_depth: depth
+            })
+        });
+
+        if (jobResponse.ok) {
+            const jobData = await jobResponse.json();
+            jobId = jobData.job_id;
+            console.log('[Map] Created site mapping job:', jobId);
+        }
+
         const discoveredUrls = new Set([startUrl]);
         const processedUrls = new Set();
         const urlsToProcess = [{ url: startUrl, level: 0 }];
@@ -438,6 +459,20 @@ async function handleMapSite(startUrl, depth) {
                         urlDataList.push({ url: link, type: 'media', level: level + 1 });
                     }
                 }
+
+                // Update job progress
+                if (jobId) {
+                    fetch(`${apiUrl}/site-map/progress`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            job_id: jobId,
+                            discovered_count: discoveredUrls.size,
+                            total_to_process: urlsToProcess.length + processedUrls.size,
+                            message: `Discovered ${discoveredUrls.size} URLs (${processedUrls.size} processed)`
+                        })
+                    }).catch(err => console.warn('[Map] Failed to update progress:', err));
+                }
             } catch (error) {
                 console.error(`Error processing ${url}:`, error);
                 await chrome.tabs.remove(tab.id).catch(() => {});
@@ -447,11 +482,25 @@ async function handleMapSite(startUrl, depth) {
         // Add the start URL to the list
         urlDataList.unshift({ url: startUrl, type: 'internal', level: 0 });
 
+        // Complete the job
+        if (jobId) {
+            const allUrls = Array.from(discoveredUrls);
+            await fetch(`${apiUrl}/site-map/complete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    job_id: jobId,
+                    discovered_urls: allUrls
+                })
+            }).catch(err => console.warn('[Map] Failed to complete job:', err));
+        }
+
         showNotification('Mapping Complete', `Found ${urlDataList.length} URLs (Internal: ${urlDataList.filter(u => u.type === 'internal').length}, External: ${urlDataList.filter(u => u.type === 'external').length}, Media: ${urlDataList.filter(u => u.type === 'media').length})`);
 
         return {
             success: true,
-            urls: urlDataList
+            urls: urlDataList,
+            jobId: jobId
         };
     } catch (error) {
         console.error('Map site error:', error);

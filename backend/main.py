@@ -167,6 +167,18 @@ class ExtractLinksResponse(BaseModel):
     success: bool
 
 
+class SiteMapRequest(BaseModel):
+    start_url: str
+    max_depth: Optional[int] = 2
+
+
+class SiteMapProgressRequest(BaseModel):
+    job_id: str
+    discovered_count: int
+    total_to_process: int
+    message: Optional[str] = ""
+
+
 class EstimateCostRequest(BaseModel):
     html: str
     model: Optional[str] = None
@@ -284,8 +296,8 @@ async def process_html(request: ProcessHTMLRequest):
             log_ai_request(logger, "fallback", len(cleaned_html), {})
             markdown, used_ai, error = request_converter.convert_to_markdown(cleaned_html, request.title, "")
             log_ai_response(logger, "fallback", len(markdown), False, error)
-        elif token_count > 20000:
-            logger.warning(f"Large content ({token_count} tokens), using chunking")
+        elif token_count > 60000:  # Conservative threshold for chunking to avoid exceeding model limits
+            logger.warning(f"Large content ({token_count} tokens exceeds 60K threshold), using chunking")
             metadata_extra = {'chunked': True}
             if request.custom_prompt:
                 metadata_extra['custom_prompt'] = True
@@ -373,6 +385,99 @@ async def extract_links(request: ExtractLinksRequest):
 
     except Exception as e:
         logger.error(f"Error extracting links: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/site-map/start")
+async def start_site_map(request: SiteMapRequest):
+    """
+    Create a new site mapping job
+    """
+    try:
+        logger.info(f"Starting site map for: {request.start_url} (max_depth: {request.max_depth})")
+
+        # Create a site map job
+        job = job_manager.create_job(
+            Job.TYPE_SITE_MAP,
+            params={
+                'start_url': request.start_url,
+                'max_depth': request.max_depth
+            }
+        )
+
+        # Start the job
+        job.start()
+        job.update_progress(0, 1, f"Starting site discovery from {request.start_url}")
+
+        logger.info(f"Site map job created: {job.id}")
+
+        return {
+            "job_id": job.id,
+            "success": True,
+            "message": "Site mapping job started"
+        }
+
+    except Exception as e:
+        logger.error(f"Error starting site map: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/site-map/progress")
+async def update_site_map_progress(request: SiteMapProgressRequest):
+    """
+    Update progress of a site mapping job
+    """
+    try:
+        job = job_manager.get_job(request.job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # Update progress
+        job.update_progress(
+            request.discovered_count,
+            max(request.total_to_process, request.discovered_count),
+            request.message or f"Discovered {request.discovered_count} pages"
+        )
+
+        return {
+            "success": True,
+            "message": "Progress updated"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating site map progress: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/site-map/complete")
+async def complete_site_map(job_id: str = Body(...), discovered_urls: List[str] = Body(...)):
+    """
+    Complete a site mapping job
+    """
+    try:
+        job = job_manager.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # Complete the job
+        job.complete({
+            'discovered_urls': discovered_urls,
+            'total_discovered': len(discovered_urls)
+        })
+
+        logger.info(f"Site map job completed: {job_id} - {len(discovered_urls)} URLs discovered")
+
+        return {
+            "success": True,
+            "message": f"Site mapping completed - {len(discovered_urls)} URLs discovered"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error completing site map: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

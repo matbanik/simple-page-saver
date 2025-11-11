@@ -8,8 +8,25 @@ import argparse
 from pathlib import Path
 
 
+def check_dependencies():
+    """Check that all required dependencies are installed before proceeding"""
+    try:
+        from dependency_checker import check_dependencies_at_startup
+
+        if not check_dependencies_at_startup():
+            print("\nERROR: Missing or incompatible dependencies detected.")
+            print("Please install all required libraries before running the application.\n")
+            sys.exit(1)
+    except Exception as e:
+        print(f"Warning: Could not run dependency check: {e}")
+        print("Continuing anyway...\n")
+
+
 def main():
     """Main launcher entry point"""
+    # Check dependencies first before doing anything else
+    check_dependencies()
+
     # Pre-process arguments to handle -gui (single dash) as --gui
     processed_args = []
     for arg in sys.argv[1:]:
