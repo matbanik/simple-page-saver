@@ -459,12 +459,120 @@ Once you've identified the issue using diagnostics:
 6. **Verify Fix**: Re-run test_diagnostic.py
 7. **Disable Diagnostics**: Remove environment variable for normal operation
 
+## Conversion Logging (NEW)
+
+**Version 2.2+** includes comprehensive logging and timeout protection for HTML conversion:
+
+### What Gets Logged
+
+**Conversion Chain:**
+```
+[CONVERSION START] HTML size: 12345 chars, Title: 'Example Page'
+[CONVERSION] API key available: False
+[CONVERSION] No API key - skipping AI conversion
+[CONVERSION] Attempting Trafilatura extraction...
+[Trafilatura] Starting with 30s timeout
+[Trafilatura] Running in thread: 139876543210
+[Trafilatura] Starting extraction with mode: balanced
+[Trafilatura] HTML size: 12345 chars
+[Trafilatura] Calling trafilatura.extract()...
+[Trafilatura] trafilatura.extract() completed in 0.52s
+[Trafilatura] Extracted text length: 3456 chars
+[Trafilatura] Final output: 3456 chars
+[Trafilatura] Completed successfully within timeout
+[CONVERSION] Trafilatura SUCCESS - 3456 chars
+```
+
+**If Trafilatura Fails/Times Out:**
+```
+[CONVERSION] Attempting html2text fallback...
+[html2text] Starting with 30s timeout
+[html2text] Running in thread: 139876543210
+[html2text] Starting html2text conversion
+[html2text] HTML size: 12345 chars
+[html2text] Calling self.html2text_converter.handle()...
+[html2text] handle() completed in 1.23s
+[html2text] Output text length: 4567 chars
+[html2text] Final markdown length: 4567 chars
+[html2text] Completed successfully within timeout
+[CONVERSION] html2text SUCCESS - 4567 chars
+```
+
+**If Conversion Hangs (Timeout):**
+```
+[html2text] Calling self.html2text_converter.handle()...
+[html2text] TIMEOUT after 30s - operation did not complete
+[html2text] This indicates html2text.handle() is hanging indefinitely
+[html2text] HTML may contain problematic content causing infinite loop
+[CONVERSION] html2text TIMEOUT after 30s
+```
+
+### Timeout Protection
+
+Each conversion method has a 30-second timeout:
+- **Trafilatura**: 30s timeout (configurable)
+- **html2text**: 30s timeout (configurable)
+- **AI conversion**: 60s timeout (built-in via requests library)
+
+**Benefits:**
+- Server never hangs indefinitely on problematic HTML
+- Clear error messages indicate which conversion method timed out
+- Allows graceful error handling instead of complete freeze
+
+### Interpreting Conversion Logs
+
+**Normal Operation:**
+1. Logs show method entry with HTML size
+2. Logs show library call (trafilatura.extract() or html2text.handle())
+3. Logs show completion time and output size
+4. Total time < 30 seconds
+
+**Hanging Conversion (Bug):**
+1. Logs show method entry with HTML size
+2. Logs show library call starting
+3. **NO logs for 30+ seconds** - indicates library hanging inside native code
+4. Timeout error logged with diagnostic message
+
+**If You See Timeouts:**
+1. Check which conversion method timed out (Trafilatura or html2text)
+2. Save the problematic HTML to a file for analysis
+3. Check backend logs for patterns (specific HTML tags, sizes, structures)
+4. Try with different extraction_mode ('recall', 'precision', 'balanced')
+5. Report issue with sample HTML (sanitized if needed)
+
+### Debugging Conversion Hangs
+
+If conversion consistently times out:
+
+**Step 1: Enable diagnostic mode** (see above)
+
+**Step 2: Capture full logs**
+```bash
+export ENABLE_DIAGNOSTICS=true
+python backend/launcher.py 2>&1 | tee conversion_debug.log
+```
+
+**Step 3: Run test with problematic HTML**
+
+**Step 4: Analyze logs**
+- Last log line before timeout shows exact hang point
+- HTML size and characteristics help identify pattern
+- Thread ID shows if it's blocking main thread or worker
+
+**Step 5: Mitigations**
+- Adjust timeout (increase if HTML is very large)
+- Try different extraction_mode
+- Pre-process HTML to remove problematic elements
+- Use AI conversion instead of fallbacks (if available)
+
 ## Support
 
 If diagnostics reveal an issue you can't resolve:
 
 1. Save diagnostic report: `curl http://localhost:8077/diagnostics > diagnostic_report.json`
 2. Save server logs: `backend/logs/simple_page_saver_*.log`
-3. Include test script output
-4. Document exact steps to reproduce
-5. Note server configuration (workers, port, OS, Python version)
+3. Save conversion debug logs (if using new logging)
+4. Include test script output
+5. Document exact steps to reproduce
+6. Note server configuration (workers, port, OS, Python version)
+7. If possible, include sanitized sample of problematic HTML
