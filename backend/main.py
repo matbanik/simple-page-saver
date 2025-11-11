@@ -99,7 +99,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Simple Page Saver API",
     description="Backend service for converting web pages to markdown",
-    lifespan=lifespan  # Register lifespan context manager
+    lifespan=lifespan,  # Register lifespan context manager
     version="1.0.0"
 )
 
