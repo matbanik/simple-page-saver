@@ -257,7 +257,7 @@ class ServerGUI:
 
             self.log_message("Settings saved successfully")
             if self.diagnostic_mode_var.get():
-                self.log_message("⚠️  Diagnostic mode enabled - detailed logging active")
+                self.log_message("WARNING: Diagnostic mode enabled - detailed logging active")
             messagebox.showinfo("Success", "Settings saved successfully!")
 
         except ValueError as e:
@@ -332,7 +332,7 @@ class ServerGUI:
             diagnostic_mode = self.settings_manager.get('diagnostic_mode', False)
             if diagnostic_mode:
                 env['ENABLE_DIAGNOSTICS'] = 'true'
-                self.log_message("🔍 Diagnostic mode enabled - detailed monitoring active")
+                self.log_message("[DIAG] Diagnostic mode enabled - detailed monitoring active")
             else:
                 env['ENABLE_DIAGNOSTICS'] = 'false'
 
@@ -471,13 +471,13 @@ class ServerGUI:
 
                 in_progress = data.get('in_progress_details', [])
                 if in_progress:
-                    self.log_message(f"\n⚠️  WARNING: {len(in_progress)} requests still in progress!")
+                    self.log_message(f"\nWARNING: {len(in_progress)} requests still in progress!")
                     import time
                     for req in in_progress:
                         elapsed = time.time() - req.get('start_time', 0)
                         self.log_message(f"  - {req.get('endpoint')}: {elapsed:.1f}s elapsed")
                 else:
-                    self.log_message("✓ No requests in progress (healthy)")
+                    self.log_message("[OK] No requests in progress (healthy)")
 
                 completed = data.get('completed_requests_count', 0)
                 self.log_message(f"\nCompleted Requests: {completed}")
@@ -489,7 +489,7 @@ class ServerGUI:
                         status = req.get('status')
                         duration = req.get('duration', 0)
                         endpoint = req.get('endpoint')
-                        status_icon = "✓" if status == "success" else "✗"
+                        status_icon = "[OK]" if status == "success" else "[FAIL]"
                         self.log_message(f"  {status_icon} {endpoint}: {status} ({duration:.2f}s)")
 
                 locks = data.get('active_locks', {})
@@ -497,7 +497,7 @@ class ServerGUI:
                 self.log_message(f"\nActive Locks: {total_locks}")
 
                 if total_locks > 0:
-                    self.log_message("⚠️  WARNING: Locks are still held!")
+                    self.log_message("WARNING: Locks are still held!")
                     for lock_name, count in locks.items():
                         self.log_message(f"  - {lock_name}: {count} holders")
 
@@ -510,7 +510,7 @@ class ServerGUI:
                                 elapsed = time.time() - entry.get('acquired_time', entry.get('acquire_time', 0))
                                 self.log_message(f"    Thread {entry.get('thread_id')}: {entry.get('status')} ({elapsed:.1f}s)")
                 else:
-                    self.log_message("✓ No active locks (healthy)")
+                    self.log_message("[OK] No active locks (healthy)")
 
                 self.log_message("=" * 80)
 
@@ -518,7 +518,7 @@ class ServerGUI:
                 if in_progress or total_locks > 0:
                     messagebox.showwarning(
                         "Diagnostic Report - Issues Detected",
-                        f"⚠️  Potential Issues Detected!\n\n"
+                        f"WARNING: Potential Issues Detected!\n\n"
                         f"Requests In Progress: {len(in_progress)}\n"
                         f"Active Locks: {total_locks}\n\n"
                         f"See log for details."
@@ -526,7 +526,7 @@ class ServerGUI:
                 else:
                     messagebox.showinfo(
                         "Diagnostic Report - Healthy",
-                        f"✓ System Healthy\n\n"
+                        f"System Healthy\n\n"
                         f"Uptime: {data.get('uptime_seconds', 0):.1f}s\n"
                         f"Active Threads: {data.get('active_threads', 0)}\n"
                         f"Completed Requests: {completed}\n"
@@ -534,7 +534,7 @@ class ServerGUI:
                     )
 
             elif response.status_code == 404:
-                self.log_message("✗ Diagnostic mode not enabled on server")
+                self.log_message("[ERROR] Diagnostic mode not enabled on server")
                 self.log_message("Enable 'Diagnostic Mode' checkbox, save settings, and restart server")
                 messagebox.showwarning(
                     "Diagnostics Not Enabled",
