@@ -110,6 +110,16 @@ class ServerGUI:
         self.log_level_combo.grid(row=row, column=1, sticky=tk.W, pady=5)
         row += 1
 
+        # Enable Logging Checkbox
+        self.enable_logging_var = tk.BooleanVar(value=True)  # Default enabled
+        self.logging_check = ttk.Checkbutton(
+            main_frame,
+            text="Enable Logging (uncheck to test if logging causes startup issues)",
+            variable=self.enable_logging_var
+        )
+        self.logging_check.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=5)
+        row += 1
+
         # Diagnostic Mode Checkbox
         self.diagnostic_mode_var = tk.BooleanVar()
         self.diagnostic_check = ttk.Checkbutton(
@@ -224,6 +234,7 @@ class ServerGUI:
         self.model_var.set(self.settings_manager.get('default_model', 'deepseek/deepseek-chat'))
         self.max_tokens_var.set(str(self.settings_manager.get('max_tokens', 32000)))
         self.log_level_var.set(self.settings_manager.get('log_level', 'INFO'))
+        self.enable_logging_var.set(self.settings_manager.get('enable_logging', True))
         self.diagnostic_mode_var.set(self.settings_manager.get('diagnostic_mode', False))
 
         api_key = self.settings_manager.get_api_key()
@@ -252,10 +263,13 @@ class ServerGUI:
             self.settings_manager.set('default_model', self.model_var.get())
             self.settings_manager.set('max_tokens', max_tokens)
             self.settings_manager.set('log_level', self.log_level_var.get())
+            self.settings_manager.set('enable_logging', self.enable_logging_var.get())
             self.settings_manager.set('diagnostic_mode', self.diagnostic_mode_var.get())
             self.settings_manager.set_api_key(self.api_key_var.get())
 
             self.log_message("Settings saved successfully")
+            if not self.enable_logging_var.get():
+                self.log_message("WARNING: Logging DISABLED - no log files will be created")
             if self.diagnostic_mode_var.get():
                 self.log_message("WARNING: Diagnostic mode enabled - detailed logging active")
             messagebox.showinfo("Success", "Settings saved successfully!")
@@ -328,6 +342,14 @@ class ServerGUI:
             import os
             env = os.environ.copy()
 
+            # Enable/disable logging based on checkbox
+            enable_logging = self.settings_manager.get('enable_logging', True)
+            if enable_logging:
+                env['ENABLE_LOGGING'] = 'true'
+            else:
+                env['ENABLE_LOGGING'] = 'false'
+                self.log_message("[WARNING] Logging DISABLED - running without logs for debugging")
+
             # Enable diagnostic mode if checkbox is checked
             diagnostic_mode = self.settings_manager.get('diagnostic_mode', False)
             if diagnostic_mode:
@@ -344,12 +366,38 @@ class ServerGUI:
                 env=env
             )
 
+            # Start threads to capture stdout and stderr
+            threading.Thread(target=self._read_output, args=(self.server_process.stdout, 'STDOUT'), daemon=True).start()
+            threading.Thread(target=self._read_output, args=(self.server_process.stderr, 'STDERR'), daemon=True).start()
+
             # Wait a moment and check status
             self.root.after(2000, self.check_server_status)
 
         except Exception as e:
             self.log_message(f"Error starting server: {str(e)}")
             messagebox.showerror("Error", f"Failed to start server: {str(e)}")
+
+    def _read_output(self, pipe, pipe_name):
+        """Read and display output from server process pipes"""
+        try:
+            for line in iter(pipe.readline, b''):
+                if line:
+                    try:
+                        text = line.decode('utf-8').strip()
+                        if text:
+                            self.log_message(f"[{pipe_name}] {text}")
+                    except UnicodeDecodeError:
+                        # Try with cp1252 for Windows
+                        try:
+                            text = line.decode('cp1252').strip()
+                            if text:
+                                self.log_message(f"[{pipe_name}] {text}")
+                        except:
+                            pass
+        except Exception as e:
+            self.log_message(f"[{pipe_name}] Error reading output: {str(e)}")
+        finally:
+            pipe.close()
 
     def stop_server(self):
         """Stop the backend server"""
