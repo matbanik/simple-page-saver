@@ -17,8 +17,9 @@ import threading
 
 load_dotenv()
 
-# Setup logging
-logger = logging.getLogger(__name__)
+# Setup logging - use child logger of main 'simple_page_saver' logger
+# This ensures it inherits the file handler and console handler configuration
+logger = logging.getLogger('simple_page_saver.ai_converter')
 
 
 class AIConverter:
