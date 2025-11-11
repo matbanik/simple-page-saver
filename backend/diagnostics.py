@@ -97,7 +97,7 @@ class DiagnosticMonitor:
     def log_lock_acquired(self, lock_name: str, requester: str):
         """Log when a lock has been acquired"""
         thread_id = threading.current_thread().ident
-        print(f"[DIAGNOSTIC LOCK] ✓ Acquired '{lock_name}' - Requester: {requester} - Thread: {thread_id}")
+        print(f"[DIAGNOSTIC LOCK] [ACQUIRED] '{lock_name}' - Requester: {requester} - Thread: {thread_id}")
 
         with self.lock:
             if lock_name in self.active_locks:
@@ -110,7 +110,7 @@ class DiagnosticMonitor:
     def log_lock_release(self, lock_name: str, requester: str):
         """Log when a lock is released"""
         thread_id = threading.current_thread().ident
-        print(f"[DIAGNOSTIC LOCK] ✗ Released '{lock_name}' - Requester: {requester} - Thread: {thread_id}")
+        print(f"[DIAGNOSTIC LOCK] [RELEASED] '{lock_name}' - Requester: {requester} - Thread: {thread_id}")
 
         with self.lock:
             if lock_name in self.active_locks:

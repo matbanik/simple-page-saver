@@ -26,11 +26,11 @@ def test_health_check():
     print_section("TEST 1: Initial Health Check")
     try:
         response = requests.get(f"{API_URL}/", timeout=5)
-        print(f"✓ Status: {response.status_code}")
-        print(f"✓ Response: {response.json()}")
+        print(f"[OK] Status: {response.status_code}")
+        print(f"[OK] Response: {response.json()}")
         return True
     except Exception as e:
-        print(f"✗ Error: {e}")
+        print(f"[ERROR] Error: {e}")
         return False
 
 def test_process_html(test_name, use_ai=False):
@@ -72,23 +72,23 @@ def test_process_html(test_name, use_ai=False):
         )
         duration = time.time() - start_time
 
-        print(f"✓ Status: {response.status_code}")
-        print(f"✓ Duration: {duration:.2f}s")
+        print(f"[OK] Status: {response.status_code}")
+        print(f"[OK] Duration: {duration:.2f}s")
 
         if response.status_code == 200:
             data = response.json()
-            print(f"✓ Job ID: {data.get('job_id')}")
-            print(f"✓ Word Count: {data.get('word_count')}")
-            print(f"✓ Used AI: {data.get('used_ai')}")
-            print(f"✓ Success: {data.get('success')}")
+            print(f"[OK] Job ID: {data.get('job_id')}")
+            print(f"[OK] Word Count: {data.get('word_count')}")
+            print(f"[OK] Used AI: {data.get('used_ai')}")
+            print(f"[OK] Success: {data.get('success')}")
             return True, duration
         else:
-            print(f"✗ Error Response: {response.text}")
+            print(f"[ERROR] Error Response: {response.text}")
             return False, duration
 
     except Exception as e:
         duration = time.time() - start_time
-        print(f"✗ Error after {duration:.2f}s: {e}")
+        print(f"[ERROR] Error after {duration:.2f}s: {e}")
         return False, duration
 
 def test_health_check_after_processing():
@@ -104,18 +104,18 @@ def test_health_check_after_processing():
     try:
         response = requests.get(f"{API_URL}/", timeout=5)
         duration = time.time() - start_time
-        print(f"✓ Status: {response.status_code}")
-        print(f"✓ Duration: {duration:.2f}s")
-        print(f"✓ Response: {response.json()}")
+        print(f"[OK] Status: {response.status_code}")
+        print(f"[OK] Duration: {duration:.2f}s")
+        print(f"[OK] Response: {response.json()}")
         return True
     except requests.exceptions.Timeout:
         duration = time.time() - start_time
-        print(f"✗ TIMEOUT after {duration:.2f}s - THIS IS THE BUG!")
-        print(f"✗ Backend did not respond within 5 seconds")
+        print(f"[ERROR] TIMEOUT after {duration:.2f}s - THIS IS THE BUG!")
+        print(f"[ERROR] Backend did not respond within 5 seconds")
         return False
     except Exception as e:
         duration = time.time() - start_time
-        print(f"✗ Error after {duration:.2f}s: {e}")
+        print(f"[ERROR] Error after {duration:.2f}s: {e}")
         return False
 
 def test_diagnostics_endpoint():
@@ -125,7 +125,7 @@ def test_diagnostics_endpoint():
     try:
         response = requests.get(f"{API_URL}/diagnostics", timeout=10)
         if response.status_code == 200:
-            print("✓ Diagnostic report retrieved successfully")
+            print("[OK] Diagnostic report retrieved successfully")
             data = response.json()
 
             print(f"\nUptime: {data.get('uptime_seconds', 0):.1f}s")
@@ -135,7 +135,7 @@ def test_diagnostics_endpoint():
 
             in_progress = data.get('in_progress_details', [])
             if in_progress:
-                print(f"\n⚠️  WARNING: {len(in_progress)} requests still in progress!")
+                print(f"\nWARNING: {len(in_progress)} requests still in progress!")
                 for req in in_progress:
                     elapsed = time.time() - req.get('start_time', 0)
                     print(f"  - {req.get('endpoint')}: {elapsed:.1f}s elapsed")
@@ -156,7 +156,7 @@ def test_diagnostics_endpoint():
 
             lock_details = data.get('lock_details', {})
             if lock_details:
-                print(f"\n⚠️  WARNING: Locks are still held!")
+                print(f"\nWARNING: Locks are still held!")
                 for lock_name, entries in lock_details.items():
                     print(f"  Lock: {lock_name}")
                     for entry in entries:
@@ -165,14 +165,14 @@ def test_diagnostics_endpoint():
 
             return True
         elif response.status_code == 404:
-            print("✗ Diagnostics not enabled")
-            print("✗ Start server with: ENABLE_DIAGNOSTICS=true python launcher.py")
+            print("[ERROR] Diagnostics not enabled")
+            print("[ERROR] Start server with: ENABLE_DIAGNOSTICS=true python launcher.py")
             return False
         else:
-            print(f"✗ Error: {response.status_code}")
+            print(f"[ERROR] Error: {response.status_code}")
             return False
     except Exception as e:
-        print(f"✗ Error: {e}")
+        print(f"[ERROR] Error: {e}")
         return False
 
 def main():
@@ -192,7 +192,7 @@ def main():
     results['initial_health'] = test_health_check()
 
     if not results['initial_health']:
-        print("\n✗ Server is not responding. Make sure it's running on port 8077")
+        print("\n[ERROR] Server is not responding. Make sure it's running on port 8077")
         return
 
     # Test 2: Process HTML
@@ -207,7 +207,7 @@ def main():
     # Summary
     print_section("TEST SUMMARY")
     for test_name, result in results.items():
-        status = "✓ PASS" if result else "✗ FAIL"
+        status = "[PASS]" if result else "[FAIL]"
         print(f"{status}: {test_name}")
 
     if not results.get('health_after_processing'):
