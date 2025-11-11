@@ -3,7 +3,7 @@ FastAPI Backend for Simple Page Saver
 Main application with REST API endpoints, logging, and settings management
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
