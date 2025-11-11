@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('refresh-jobs').addEventListener('click', loadJobs);
     document.getElementById('clear-completed-jobs').addEventListener('click', clearCompletedJobs);
     document.getElementById('extract-current').addEventListener('click', extractCurrentPage);
-    document.getElementById('scrape-url').addEventListener('click', scrapeManualUrl);
+    document.getElementById('execute-url-action').addEventListener('click', executeUrlAction);
     document.getElementById('open-in-tab').addEventListener('click', openInTab);
     document.getElementById('map-site').addEventListener('click', mapSite);
     document.getElementById('extract-selected').addEventListener('click', extractSelectedPages);
@@ -858,24 +858,27 @@ async function loadJobContext(job) {
             } else {
                 showStatus('No URLs found in job result', 'warning');
             }
-        } else if (job.type === 'single_page' && job.status === 'completed' && job.result) {
-            // For single page jobs, download the markdown content
-            const markdown = job.result.markdown;
-            const filename = job.result.filename || 'page.md';
+        } else if (job.type === 'single_page') {
+            // For single page jobs, restore the URL in the manual URL input
+            const url = job.params.url || '';
 
-            if (markdown) {
-                // Download the markdown file
-                const blob = new Blob([markdown], { type: 'text/markdown' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                a.click();
-                URL.revokeObjectURL(url);
+            if (url) {
+                document.getElementById('manual-url-input').value = url;
+                document.getElementById('url-action-type').value = 'scrape';
 
-                showStatus(`Downloaded: ${filename} (${job.result.word_count || 0} words)`, 'success');
+                // Show progress for in-progress jobs
+                if (job.status === 'processing') {
+                    updateProgress(job.progress.current, job.progress.total, job.progress.message);
+                    showStatus(`Job in progress: ${job.progress.message}`, 'info');
+                } else if (job.status === 'completed') {
+                    showStatus(`Job completed: ${job.result?.filename || 'page.md'}`, 'success');
+                } else if (job.status === 'failed') {
+                    showStatus(`Job failed: ${job.error}`, 'error');
+                } else {
+                    showStatus(`Job loaded: ${url}`, 'success');
+                }
             } else {
-                showStatus('No markdown content found in job result', 'warning');
+                showStatus('No URL found in job params', 'warning');
             }
         } else {
             showStatus('Cannot load context for this job type', 'warning');
@@ -957,9 +960,10 @@ async function clearCompletedJobs() {
     }
 }
 
-// Scrape manually entered URL
-async function scrapeManualUrl() {
+// Execute URL action (scrape or map)
+async function executeUrlAction() {
     const urlInput = document.getElementById('manual-url-input');
+    const actionType = document.getElementById('url-action-type').value;
     const url = urlInput.value.trim();
 
     if (!url) {
@@ -975,7 +979,45 @@ async function scrapeManualUrl() {
         return;
     }
 
-    console.log('[Manual Scrape] Scraping URL:', url);
+    if (actionType === 'map') {
+        // Map site - use the existing mapSite logic but with manual URL
+        console.log('[URL Action] Mapping site:', url);
+        await mapSiteFromUrl(url);
+    } else {
+        // Scrape page
+        console.log('[URL Action] Scraping page:', url);
+        await scrapeManualUrl(url);
+    }
+}
+
+// Map site from manual URL
+async function mapSiteFromUrl(url) {
+    const depth = document.getElementById('depth-select').value;
+
+    showStatus(`Mapping site: ${url} (depth: ${depth})`, 'info');
+
+    try {
+        const result = await chrome.runtime.sendMessage({
+            action: 'mapSite',
+            url: url,
+            depth: parseInt(depth)
+        });
+
+        if (result.success) {
+            discoveredUrls = result.urls;
+            displayDiscoveredUrls(result.urls);
+            showStatus(`Discovered ${result.urls.length} URLs`, 'success');
+        } else {
+            showStatus(`Error: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('[Map Site] Error:', error);
+        showStatus(`Failed to map site: ${error.message}`, 'error');
+    }
+}
+
+// Scrape manually entered URL
+async function scrapeManualUrl(url) {
     showStatus(`Fetching ${url}...`, 'info');
 
     try {
@@ -998,7 +1040,7 @@ async function scrapeManualUrl() {
         });
 
         // Clear the input
-        urlInput.value = '';
+        document.getElementById('manual-url-input').value = '';
     } catch (error) {
         console.error('[Manual Scrape] Error:', error);
         showStatus(`Failed to scrape URL: ${error.message}`, 'error');

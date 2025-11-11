@@ -481,10 +481,14 @@
     </div>
 
     <div class="section">
-        <div class="section-title">Scrape Any URL</div>
+        <div class="section-title">URL</div>
         <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-            <input type="text" id="manual-url-input" placeholder="Enter URL to scrape..." style="flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px;">
-            <button id="scrape-url" class="btn-primary" style="padding: 8px 16px;">Scrape</button>
+            <input type="text" id="manual-url-input" placeholder="Enter URL..." style="flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px;">
+            <select id="url-action-type" style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; min-width: 100px;">
+                <option value="map">Map Site</option>
+                <option value="scrape">Scrape Page</option>
+            </select>
+            <button id="execute-url-action" class="btn-primary" style="padding: 8px 16px;">Go</button>
         </div>
     </div>
 
