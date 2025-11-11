@@ -75,7 +75,7 @@ class ParallelChunkProcessor:
                     result = future.result()
                     results.append(result)
 
-                    status = "✓" if result.success else "✗"
+                    status = "[OK]" if result.success else "[FAIL]"
                     logger.info(f"[Parallel] Chunk {chunk_idx+1}/{len(chunks)} {status} ({result.processing_time:.2f}s)")
                     print(f"[Parallel] Chunk {chunk_idx+1}/{len(chunks)} {status} ({result.processing_time:.2f}s)")
 

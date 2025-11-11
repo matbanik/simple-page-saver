@@ -77,7 +77,7 @@ class ProcessingMonitor:
         )
         self.chunk_metrics.append(metrics)
 
-        status = "✓" if success else "✗"
+        status = "[OK]" if success else "[FAIL]"
         logger.info(
             f"[Monitor] Chunk {chunk_index+1} {status}: "
             f"{input_tokens} in, {output_tokens} out, {processing_time:.2f}s"

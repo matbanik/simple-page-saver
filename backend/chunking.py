@@ -194,8 +194,8 @@ class SmartChunker:
         chunk_count = math.ceil(total_tokens / self.max_tokens)
         target_tokens_per_chunk = math.ceil(total_tokens / chunk_count)
 
-        logger.info(f"[Chunking] Pre-allocation: {total_tokens} tokens → {chunk_count} chunks of ~{target_tokens_per_chunk} tokens")
-        print(f"[Chunking] Pre-allocation: {total_tokens} tokens → {chunk_count} chunks of ~{target_tokens_per_chunk} tokens")
+        logger.info(f"[Chunking] Pre-allocation: {total_tokens} tokens -> {chunk_count} chunks of ~{target_tokens_per_chunk} tokens")
+        print(f"[Chunking] Pre-allocation: {total_tokens} tokens -> {chunk_count} chunks of ~{target_tokens_per_chunk} tokens")
 
         # Step 3: Try strategies in order until one succeeds
         chunks = None
