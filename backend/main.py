@@ -222,6 +222,35 @@ async def health_check():
     }
 
 
+@app.get("/settings")
+async def get_settings():
+    """Get all settings (excluding sensitive data)"""
+    logger.debug("Settings requested")
+    return settings.get_all_settings()
+
+
+@app.post("/settings")
+async def update_settings(updates: dict = Body(...)):
+    """Update one or more settings"""
+    logger.info(f"Updating settings: {list(updates.keys())}")
+
+    # Update each setting
+    for key, value in updates.items():
+        # Skip sensitive keys that shouldn't be updated this way
+        if key in ['openrouter_api_key_encrypted', '_salt']:
+            logger.warning(f"Attempted to update protected setting: {key}")
+            continue
+
+        settings.set(key, value)
+        logger.info(f"Updated setting: {key} = {value}")
+
+    return {
+        "status": "success",
+        "updated": list(updates.keys()),
+        "settings": settings.get_all_settings()
+    }
+
+
 @app.post("/process-html", response_model=ProcessHTMLResponse)
 async def process_html(request: ProcessHTMLRequest):
     """
