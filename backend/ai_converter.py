@@ -28,6 +28,20 @@ logger = logging.getLogger('simple_page_saver.ai_converter')
 class AIConverter:
     """Converts HTML to Markdown using OpenRouter API with fallback"""
 
+    # Model configurations with context window limits (in tokens)
+    MODEL_CONTEXT_LIMITS = {
+        'openai/gpt-3.5-turbo': 16000,
+        'openai/gpt-4-turbo': 128000,
+        'openai/gpt-4o': 128000,
+        'anthropic/claude-3-sonnet': 200000,
+        'anthropic/claude-3-haiku': 200000,
+        'anthropic/claude-3.5-sonnet': 200000,
+        'deepseek/deepseek-chat': 128000,
+        'google/gemini-pro': 32000,
+        'google/gemini-1.5-pro': 1000000,
+        'meta-llama/llama-3-70b': 8000,
+    }
+
     # Model configurations with approximate costs
     MODELS = {
         'gpt-3.5-turbo': 'openai/gpt-3.5-turbo',
@@ -65,6 +79,27 @@ Guidelines:
         self.html2text_converter.ignore_emphasis = False
         self.html2text_converter.body_width = 0  # Don't wrap lines
         self.html2text_converter.ignore_tables = False
+
+    def get_model_context_limit(self) -> int:
+        """
+        Get the context window limit for the current model
+
+        Returns:
+            Maximum context tokens for the model (defaults to 128K if unknown)
+        """
+        # Try exact match first
+        if self.model in self.MODEL_CONTEXT_LIMITS:
+            return self.MODEL_CONTEXT_LIMITS[self.model]
+
+        # Try fuzzy match (e.g., "gpt-4-turbo-preview" matches "gpt-4-turbo")
+        for known_model, limit in self.MODEL_CONTEXT_LIMITS.items():
+            if known_model in self.model or self.model in known_model:
+                logger.info(f"[Model Context] Fuzzy matched '{self.model}' to '{known_model}': {limit} tokens")
+                return limit
+
+        # Default to conservative 128K for unknown models
+        logger.warning(f"[Model Context] Unknown model '{self.model}', defaulting to 128K context limit")
+        return 128000
 
     def convert_to_markdown(self, html: str, title: str = "", custom_prompt: str = "") -> Tuple[str, bool, Optional[str]]:
         """
@@ -159,17 +194,17 @@ Guidelines:
         input_tokens = system_tokens + user_tokens
         total_tokens = input_tokens + output_tokens
 
+        # Get model-specific context limit dynamically
+        max_context = self.get_model_context_limit()
+
         logger.info(f"[Token Count] System: {system_tokens}, User: {user_tokens}, Output: {output_tokens}, Total: {total_tokens}")
-        print(f"[Token Count] Input: {input_tokens}, Output: {output_tokens}, Total: {total_tokens}")
+        logger.info(f"[Token Count] Model: {self.model}, Context Limit: {max_context}")
+        print(f"[Token Count] Input: {input_tokens}, Output: {output_tokens}, Total: {total_tokens}, Limit: {max_context}")
 
-        # Most models have 128K-256K context limits
-        # Use 250K as maximum to stay within limits (no buffer needed - we're precise now)
-        MAX_CONTEXT_TOKENS = 250000
-
-        if total_tokens > MAX_CONTEXT_TOKENS:
+        if total_tokens > max_context:
             raise ValueError(
                 f"Content too large: {total_tokens} tokens (input: {input_tokens}, output: {output_tokens}) "
-                f"exceeds {MAX_CONTEXT_TOKENS} limit. Please use chunking for large content."
+                f"exceeds {max_context} limit for model '{self.model}'. Please use chunking for large content."
             )
 
         payload = {
@@ -280,17 +315,23 @@ Guidelines:
         logger.info("[Trafilatura] Calling trafilatura.extract()...")
         start_time = time.time()
 
+        # Configure what to include/exclude to minimize token usage while preserving visible text
+        # Exclude images and links to reduce tokens - AI will focus on text content
+        # Keep tables as they contain important structured data
         text = trafilatura.extract(
             html,
             include_comments=False,
-            include_tables=True,  # Include tables for better data preservation
-            include_images=True,  # Include image references
-            include_links=True,   # Preserve links
+            include_tables=True,     # Keep tables for data
+            include_images=False,    # Drop images to save tokens
+            include_links=False,     # Drop links to save tokens
+            include_formatting=True, # Keep minimal formatting for readability
             favor_recall=favor_recall,
             favor_precision=favor_precision,
-            output_format='markdown',  # Direct markdown output
+            output_format='markdown', # Direct markdown output
             config=config  # Use custom config to fix spacing
         )
+
+        logger.info(f"[Trafilatura] Extraction complete - images: False, links: False (token optimization)")
 
         elapsed = time.time() - start_time
         logger.info(f"[Trafilatura] trafilatura.extract() completed in {elapsed:.2f}s")
@@ -449,9 +490,12 @@ Guidelines:
         title_tokens = count_tokens(f"\nPage Title: {title}", model_name) if title else 0
         overhead_tokens = system_tokens + custom_tokens + title_tokens
 
+        # Get model-specific context limit
+        max_context = self.get_model_context_limit()
+
         # Reserve space for output (4000) and overhead
-        # Max input: 250K total - 4K output - overhead
-        max_input_tokens = 250000 - 4000 - overhead_tokens
+        # Max input: model_context - 4K output - overhead
+        max_input_tokens = max_context - 4000 - overhead_tokens
 
         # Count tokens in HTML
         html_tokens = count_tokens(html, model_name)

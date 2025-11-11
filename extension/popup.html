@@ -413,7 +413,12 @@
     </style>
 </head>
 <body>
-    <h1>🗂️ Simple Page Saver</h1>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <h1 style="margin-bottom: 0;">🗂️ Simple Page Saver</h1>
+        <button id="open-in-tab" style="padding: 4px 10px; font-size: 11px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer;" title="Open in full tab">
+            Open in Tab ↗
+        </button>
+    </div>
 
     <!-- Connection Status Indicator -->
     <div id="connection-status" class="checking">
@@ -472,6 +477,14 @@
             </select>
             <textarea id="custom-prompt" placeholder="Optional: Add custom instructions for AI processing..."
                       style="width: 100%; height: 60px; padding: 6px; font-size: 12px; resize: vertical; font-family: inherit; display: none;"></textarea>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-title">Scrape Any URL</div>
+        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+            <input type="text" id="manual-url-input" placeholder="Enter URL to scrape..." style="flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px;">
+            <button id="scrape-url" class="btn-primary" style="padding: 8px 16px;">Scrape</button>
         </div>
     </div>
 

@@ -24,6 +24,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('refresh-jobs').addEventListener('click', loadJobs);
     document.getElementById('clear-completed-jobs').addEventListener('click', clearCompletedJobs);
     document.getElementById('extract-current').addEventListener('click', extractCurrentPage);
+    document.getElementById('scrape-url').addEventListener('click', scrapeManualUrl);
+    document.getElementById('open-in-tab').addEventListener('click', openInTab);
     document.getElementById('map-site').addEventListener('click', mapSite);
     document.getElementById('extract-selected').addEventListener('click', extractSelectedPages);
     document.getElementById('settings-link').addEventListener('click', showSettings);
@@ -730,8 +732,8 @@ function createJobElement(job) {
     // Show remove button for completed/failed jobs
     const showRemoveButton = job.status === 'completed' || job.status === 'failed';
 
-    // Show load button for completed site_map jobs
-    const showLoadButton = job.status === 'completed' && job.type === 'site_map';
+    // Show load button for ALL completed jobs
+    const showLoadButton = job.status === 'completed';
 
     div.innerHTML = `
         <div class="job-header">
@@ -856,6 +858,25 @@ async function loadJobContext(job) {
             } else {
                 showStatus('No URLs found in job result', 'warning');
             }
+        } else if (job.type === 'single_page' && job.status === 'completed' && job.result) {
+            // For single page jobs, download the markdown content
+            const markdown = job.result.markdown;
+            const filename = job.result.filename || 'page.md';
+
+            if (markdown) {
+                // Download the markdown file
+                const blob = new Blob([markdown], { type: 'text/markdown' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.click();
+                URL.revokeObjectURL(url);
+
+                showStatus(`Downloaded: ${filename} (${job.result.word_count || 0} words)`, 'success');
+            } else {
+                showStatus('No markdown content found in job result', 'warning');
+            }
         } else {
             showStatus('Cannot load context for this job type', 'warning');
         }
@@ -936,6 +957,66 @@ async function clearCompletedJobs() {
     }
 }
 
+// Scrape manually entered URL
+async function scrapeManualUrl() {
+    const urlInput = document.getElementById('manual-url-input');
+    const url = urlInput.value.trim();
+
+    if (!url) {
+        showStatus('Please enter a URL', 'error');
+        return;
+    }
+
+    // Validate URL format
+    try {
+        new URL(url);
+    } catch (e) {
+        showStatus('Invalid URL format', 'error');
+        return;
+    }
+
+    console.log('[Manual Scrape] Scraping URL:', url);
+    showStatus(`Fetching ${url}...`, 'info');
+
+    try {
+        // Fetch the URL
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const html = await response.text();
+        const title = extractTitleFromHTML(html) || url;
+
+        console.log('[Manual Scrape] Fetched HTML, size:', html.length);
+
+        // Process the HTML using the standard extraction flow
+        await processPage({
+            url: url,
+            html: html,
+            title: title
+        });
+
+        // Clear the input
+        urlInput.value = '';
+    } catch (error) {
+        console.error('[Manual Scrape] Error:', error);
+        showStatus(`Failed to scrape URL: ${error.message}`, 'error');
+    }
+}
+
+// Open extension in a new tab
+function openInTab() {
+    // Get the extension URL for the popup
+    const popupUrl = chrome.runtime.getURL('popup.html');
+
+    // Open in a new tab
+    chrome.tabs.create({ url: popupUrl });
+
+    // Close the popup (only works if opened as popup, not if already in tab)
+    window.close();
+}
+
 // Helper: Get time ago string
 function getTimeAgo(timestamp) {
     const time = new Date(timestamp);
@@ -951,4 +1032,10 @@ function getTimeAgo(timestamp) {
 function truncate(str, maxLength) {
     if (str.length <= maxLength) return str;
     return str.substring(0, maxLength - 3) + '...';
+}
+
+// Helper: Extract title from HTML
+function extractTitleFromHTML(html) {
+    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    return titleMatch ? titleMatch[1].trim() : null;
 }

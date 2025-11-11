@@ -13,13 +13,19 @@ class HTMLPreprocessor:
     """Preprocesses HTML to reduce token count while preserving content"""
 
     # Tags to completely remove along with their content
+    # Expanded to include more non-content elements that waste tokens
     STRIP_TAGS = [
-        'script', 'style', 'noscript', 'svg'
+        'script', 'style', 'noscript', 'svg',
+        'iframe', 'embed', 'object',  # Embedded content
+        'video', 'audio', 'source',   # Media elements
+        'canvas', 'map', 'area'       # Interactive/visual elements
     ]
 
-    # Navigation and UI elements to remove (less aggressive)
+    # Navigation and UI elements to remove
+    # Expanded to catch more non-content elements
     NAV_TAGS = [
-        'nav', 'header', 'footer'
+        'nav', 'header', 'footer', 'aside',
+        'menu', 'menuitem'  # Menu elements
     ]
 
     # Semantic tags to preserve (expanded list)

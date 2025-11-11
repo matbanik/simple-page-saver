@@ -289,29 +289,23 @@ async def process_html(request: ProcessHTMLRequest):
         )
         logger.info(f"Using extraction mode: {request.extraction_mode}")
 
-        # Step 4: Convert to markdown (with chunking if needed)
+        # Step 4: Convert to markdown (with automatic chunking if needed)
+        # ALWAYS use convert_large_html() - it handles chunking logic internally with proper token counting
         job.update_progress(3, 4, 'Converting to markdown...')
         if not request.use_ai:
             logger.info("AI disabled by user, using Trafilatura/html2text fallback")
             log_ai_request(logger, "fallback", len(cleaned_html), {})
             markdown, used_ai, error = request_converter.convert_to_markdown(cleaned_html, request.title, "")
             log_ai_response(logger, "fallback", len(markdown), False, error)
-        elif token_count > 200000:  # Chunking threshold: 200K tokens (we count precisely now, leaving room for overhead)
-            logger.warning(f"Large content ({token_count} tokens exceeds 200K threshold), using chunking")
-            metadata_extra = {'chunked': True}
-            if request.custom_prompt:
-                metadata_extra['custom_prompt'] = True
-                logger.info(f"Using custom prompt (length: {len(request.custom_prompt)} chars)")
-            log_ai_request(logger, settings.get('default_model'), len(cleaned_html), metadata_extra)
-            markdown, used_ai, error = request_converter.convert_large_html(cleaned_html, request.title, request.custom_prompt)
-            log_ai_response(logger, settings.get('default_model'), len(markdown), used_ai, error)
         else:
+            # Always use convert_large_html() - it automatically determines if chunking is needed
+            # based on precise token counts including all prompt overhead
             metadata_extra = {}
             if request.custom_prompt:
                 metadata_extra['custom_prompt'] = True
                 logger.info(f"Using custom prompt (length: {len(request.custom_prompt)} chars)")
             log_ai_request(logger, settings.get('default_model'), len(cleaned_html), metadata_extra)
-            markdown, used_ai, error = request_converter.convert_to_markdown(cleaned_html, request.title, request.custom_prompt)
+            markdown, used_ai, error = request_converter.convert_large_html(cleaned_html, request.title, request.custom_prompt)
             log_ai_response(logger, settings.get('default_model'), len(markdown), used_ai, error)
 
         # Step 5: Generate filename from title or URL
