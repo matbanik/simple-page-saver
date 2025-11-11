@@ -13,7 +13,7 @@ Use this to debug connection timeout issues, lock deadlocks, resource leaks, and
 
 ## Enabling Diagnostic Mode
 
-### Method 1: GUI Checkbox (Recommended - Easiest!)
+### Using the GUI (Recommended)
 
 1. **Launch GUI**:
    ```bash
@@ -23,9 +23,10 @@ Use this to debug connection timeout issues, lock deadlocks, resource leaks, and
    ```
 
 2. **Enable Diagnostic Mode**:
-   - Check the "Enable Diagnostic Mode" checkbox in Settings
+   - Check the "Enable Diagnostic Mode" checkbox in Settings section
    - Click "Save Settings"
    - Click "Start Server" (or restart if already running)
+   - You'll see "[DIAG] Diagnostic mode enabled" in the log output
 
 3. **View Diagnostic Report**:
    - Click "View Diagnostic Report" button in Testing section
@@ -33,45 +34,13 @@ Use this to debug connection timeout issues, lock deadlocks, resource leaks, and
    - Warns if issues detected (hung requests, held locks)
 
 **Benefits**:
-- ✓ No need to set environment variables
-- ✓ Persists across restarts (saved in settings.json)
-- ✓ Visual indicator when enabled
-- ✓ Built-in report viewer in GUI
+- No command-line configuration needed
+- Setting persists across restarts (saved in settings.json)
+- Visual indicator when enabled
+- Built-in report viewer in GUI
+- One-click enable/disable
 
-### Method 2: Environment Variable (Advanced)
-
-**Linux/Mac:**
-```bash
-export ENABLE_DIAGNOSTICS=true
-cd backend
-python launcher.py
-```
-
-**Windows PowerShell:**
-```powershell
-$env:ENABLE_DIAGNOSTICS = "true"
-cd backend
-python launcher.py
-```
-
-**Windows CMD:**
-```cmd
-set ENABLE_DIAGNOSTICS=true
-cd backend
-python launcher.py
-```
-
-### Method 3: Inline with Command
-
-**Linux/Mac:**
-```bash
-ENABLE_DIAGNOSTICS=true python backend/launcher.py
-```
-
-**Windows PowerShell:**
-```powershell
-$env:ENABLE_DIAGNOSTICS="true"; python backend/launcher.py
-```
+**Note**: Diagnostic mode is automatically disabled by default. Only enable when troubleshooting issues, as it impacts performance.
 
 ## What Gets Logged
 
@@ -180,11 +149,13 @@ curl http://localhost:8077/diagnostics
 
 Use the included test script to reproduce the timeout issue:
 
-```bash
-# Start server with diagnostics
-export ENABLE_DIAGNOSTICS=true
-python backend/launcher.py
+**Step 1: Start server with diagnostics**
+1. Launch GUI: `python backend/launcher.py -gui`
+2. Enable "Diagnostic Mode" checkbox in Settings
+3. Click "Save Settings" then "Start Server"
 
+**Step 2: Run diagnostic test**
+```bash
 # In another terminal, run test
 python backend/test_diagnostic.py
 ```
@@ -307,20 +278,12 @@ Both use request IDs (e.g., `[a3b4c5d6]`) for correlation.
 
 ## Disabling Diagnostic Mode
 
-Remove or set environment variable:
+1. Open GUI: `python backend/launcher.py -gui`
+2. Uncheck "Enable Diagnostic Mode" checkbox
+3. Click "Save Settings"
+4. Restart server
 
-```bash
-# Linux/Mac
-unset ENABLE_DIAGNOSTICS
-
-# Windows PowerShell
-Remove-Item Env:ENABLE_DIAGNOSTICS
-
-# Windows CMD
-set ENABLE_DIAGNOSTICS=
-```
-
-Or restart server without the environment variable.
+The setting is saved in `backend/settings.json` and will persist across restarts.
 
 ## Architecture
 
@@ -359,12 +322,14 @@ This is separate from JobManager.lock and won't cause deadlocks.
 
 ## Example Diagnostic Session
 
-```bash
-# Terminal 1: Start server with diagnostics
-$ export ENABLE_DIAGNOSTICS=true
-$ cd backend
-$ python launcher.py
+**Terminal 1: Start server with diagnostics via GUI**
+1. Run: `python backend/launcher.py -gui`
+2. Check "Enable Diagnostic Mode" in Settings
+3. Click "Save Settings"
+4. Click "Start Server"
 
+You'll see:
+```
 === Simple Page Saver Backend Starting ===
 ================================================================================
 DIAGNOSTIC MODE ENABLED
@@ -375,10 +340,12 @@ INFO:     Started server process [12345]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8077
+```
 
-# Terminal 2: Run diagnostic test
-$ cd backend
-$ python test_diagnostic.py
+**Terminal 2: Run diagnostic test**
+```bash
+cd backend
+python test_diagnostic.py
 
 ================================================================================
   TEST 1: Initial Health Check
@@ -544,24 +511,36 @@ Each conversion method has a 30-second timeout:
 
 If conversion consistently times out:
 
-**Step 1: Enable diagnostic mode** (see above)
+**Step 1: Enable diagnostic mode**
+1. Open GUI: `python backend/launcher.py -gui`
+2. Check "Enable Diagnostic Mode" checkbox
+3. Click "Save Settings"
+4. Click "Start Server"
 
 **Step 2: Capture full logs**
-```bash
-export ENABLE_DIAGNOSTICS=true
-python backend/launcher.py 2>&1 | tee conversion_debug.log
-```
+
+Option A - Via GUI:
+- Click "View Logs" button to see real-time output
+- Logs are automatically saved to `backend/logs/simple_page_saver_*.log`
+
+Option B - Direct launch with log capture:
+1. Enable diagnostic mode in GUI first (saves to settings.json)
+2. Stop GUI server
+3. Run: `python backend/launcher.py 2>&1 | tee conversion_debug.log`
 
 **Step 3: Run test with problematic HTML**
+- Use extension to extract the problematic page
+- Or run `python backend/test_diagnostic.py`
 
 **Step 4: Analyze logs**
 - Last log line before timeout shows exact hang point
 - HTML size and characteristics help identify pattern
 - Thread ID shows if it's blocking main thread or worker
+- Check GUI's "View Diagnostic Report" for current state
 
 **Step 5: Mitigations**
 - Adjust timeout (increase if HTML is very large)
-- Try different extraction_mode
+- Try different extraction_mode (Balanced/Recall/Precision)
 - Pre-process HTML to remove problematic elements
 - Use AI conversion instead of fallbacks (if available)
 

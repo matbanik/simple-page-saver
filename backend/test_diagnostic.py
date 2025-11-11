@@ -6,8 +6,10 @@ This script simulates the issue where:
 2. Second request (like GUI health check) times out after first request completes
 
 Usage:
-  Set ENABLE_DIAGNOSTICS=true before running the server
-  Then run this script to simulate the problem
+  1. Launch GUI: python launcher.py -gui
+  2. Enable 'Diagnostic Mode' checkbox in Settings
+  3. Click 'Save Settings' then 'Start Server'
+  4. Run this script to simulate the problem
 """
 
 import requests
@@ -166,7 +168,10 @@ def test_diagnostics_endpoint():
             return True
         elif response.status_code == 404:
             print("[ERROR] Diagnostics not enabled")
-            print("[ERROR] Start server with: ENABLE_DIAGNOSTICS=true python launcher.py")
+            print("[ERROR] Enable diagnostic mode in GUI:")
+            print("[ERROR]   1. Launch GUI: python launcher.py -gui")
+            print("[ERROR]   2. Check 'Enable Diagnostic Mode' checkbox")
+            print("[ERROR]   3. Save Settings and restart server")
             return False
         else:
             print(f"[ERROR] Error: {response.status_code}")
@@ -183,7 +188,10 @@ def main():
     print("2. Process a test HTML page")
     print("3. Attempt health check after processing (where timeout occurs)")
     print("4. Retrieve diagnostic report")
-    print("\nMake sure server is running with ENABLE_DIAGNOSTICS=true")
+    print("\nMake sure server is running with diagnostic mode enabled:")
+    print("  1. Launch GUI: python launcher.py -gui")
+    print("  2. Enable 'Diagnostic Mode' checkbox in Settings")
+    print("  3. Click 'Save Settings' then 'Start Server'")
     input("\nPress Enter to start tests...")
 
     results = {}
