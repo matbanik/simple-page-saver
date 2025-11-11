@@ -428,7 +428,14 @@ Once you've identified the issue using diagnostics:
 
 ## Conversion Logging (NEW)
 
-**Version 2.2+** includes comprehensive logging and timeout protection for HTML conversion:
+**Version 2.2+** includes comprehensive logging and timeout protection for HTML conversion.
+
+**IMPORTANT**: Conversion logs are written to a **separate, standalone log file** to avoid lock conflicts with the main logging system:
+- **Log file**: `backend/logs/conversion_debug_YYYYMMDD.log`
+- Independent from main logs and GUI console
+- Thread-safe and buffered to prevent blocking
+- Automatically created when first conversion runs
+- Check this file to see detailed conversion progress and identify hang points
 
 ### What Gets Logged
 
@@ -519,23 +526,20 @@ If conversion consistently times out:
 
 **Step 2: Capture full logs**
 
-Option A - Via GUI:
-- Click "View Logs" button to see real-time output
-- Logs are automatically saved to `backend/logs/simple_page_saver_*.log`
-
-Option B - Direct launch with log capture:
-1. Enable diagnostic mode in GUI first (saves to settings.json)
-2. Stop GUI server
-3. Run: `python backend/launcher.py 2>&1 | tee conversion_debug.log`
+Conversion logs are written to standalone file:
+- **Conversion logs**: `backend/logs/conversion_debug_YYYYMMDD.log` (automatic)
+- **Main server logs**: `backend/logs/simple_page_saver_YYYYMMDD.log` (automatic)
+- **Diagnostic logs**: Shown in GUI console if diagnostic mode enabled
 
 **Step 3: Run test with problematic HTML**
 - Use extension to extract the problematic page
 - Or run `python backend/test_diagnostic.py`
 
 **Step 4: Analyze logs**
+- **Check conversion_debug_YYYYMMDD.log FIRST** - shows exact conversion progress
 - Last log line before timeout shows exact hang point
 - HTML size and characteristics help identify pattern
-- Thread ID shows if it's blocking main thread or worker
+- Thread name shows if it's blocking main thread or worker
 - Check GUI's "View Diagnostic Report" for current state
 
 **Step 5: Mitigations**
@@ -549,8 +553,8 @@ Option B - Direct launch with log capture:
 If diagnostics reveal an issue you can't resolve:
 
 1. Save diagnostic report: `curl http://localhost:8077/diagnostics > diagnostic_report.json`
-2. Save server logs: `backend/logs/simple_page_saver_*.log`
-3. Save conversion debug logs (if using new logging)
+2. **Save conversion debug logs**: `backend/logs/conversion_debug_YYYYMMDD.log` (CRITICAL for conversion hangs)
+3. Save server logs: `backend/logs/simple_page_saver_YYYYMMDD.log`
 4. Include test script output
 5. Document exact steps to reproduce
 6. Note server configuration (workers, port, OS, Python version)

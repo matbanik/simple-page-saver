@@ -17,8 +17,51 @@ import threading
 
 load_dotenv()
 
-# Setup logging
-logger = logging.getLogger(__name__)
+# Setup standalone logging for conversion debugging
+# This is completely independent from main logger to avoid lock conflicts
+def setup_conversion_logger():
+    """Create independent logger for conversion debugging"""
+    from pathlib import Path
+    from datetime import datetime
+
+    # Create logs directory if it doesn't exist
+    log_dir = Path(__file__).parent / 'logs'
+    log_dir.mkdir(exist_ok=True)
+
+    # Create dedicated conversion log file
+    timestamp = datetime.now().strftime('%Y%m%d')
+    log_file = log_dir / f'conversion_debug_{timestamp}.log'
+
+    # Create independent logger
+    conv_logger = logging.getLogger('conversion_debug')
+    conv_logger.setLevel(logging.INFO)
+    conv_logger.propagate = False  # Don't propagate to parent loggers
+
+    # Remove any existing handlers to avoid duplicates
+    conv_logger.handlers.clear()
+
+    # Create file handler with thread-safe buffering
+    file_handler = logging.FileHandler(log_file, encoding='utf-8', mode='a')
+    file_handler.setLevel(logging.INFO)
+
+    # Simple formatter without unicode
+    formatter = logging.Formatter(
+        '[%(asctime)s] [%(levelname)s] [%(threadName)s] %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    file_handler.setFormatter(formatter)
+
+    conv_logger.addHandler(file_handler)
+
+    # Log initialization
+    conv_logger.info(f"="*80)
+    conv_logger.info(f"Conversion Debug Logger Initialized")
+    conv_logger.info(f"Log file: {log_file}")
+    conv_logger.info(f"="*80)
+
+    return conv_logger
+
+logger = setup_conversion_logger()
 
 
 class AIConverter:
