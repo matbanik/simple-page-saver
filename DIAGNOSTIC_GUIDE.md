@@ -13,7 +13,7 @@ Use this to debug connection timeout issues, lock deadlocks, resource leaks, and
 
 ## Enabling Diagnostic Mode
 
-### Method 1: GUI Checkbox (Recommended - Easiest!)
+### Using the GUI (Recommended)
 
 1. **Launch GUI**:
    ```bash
@@ -23,9 +23,10 @@ Use this to debug connection timeout issues, lock deadlocks, resource leaks, and
    ```
 
 2. **Enable Diagnostic Mode**:
-   - Check the "Enable Diagnostic Mode" checkbox in Settings
+   - Check the "Enable Diagnostic Mode" checkbox in Settings section
    - Click "Save Settings"
    - Click "Start Server" (or restart if already running)
+   - You'll see "[DIAG] Diagnostic mode enabled" in the log output
 
 3. **View Diagnostic Report**:
    - Click "View Diagnostic Report" button in Testing section
@@ -33,45 +34,13 @@ Use this to debug connection timeout issues, lock deadlocks, resource leaks, and
    - Warns if issues detected (hung requests, held locks)
 
 **Benefits**:
-- ✓ No need to set environment variables
-- ✓ Persists across restarts (saved in settings.json)
-- ✓ Visual indicator when enabled
-- ✓ Built-in report viewer in GUI
+- No command-line configuration needed
+- Setting persists across restarts (saved in settings.json)
+- Visual indicator when enabled
+- Built-in report viewer in GUI
+- One-click enable/disable
 
-### Method 2: Environment Variable (Advanced)
-
-**Linux/Mac:**
-```bash
-export ENABLE_DIAGNOSTICS=true
-cd backend
-python launcher.py
-```
-
-**Windows PowerShell:**
-```powershell
-$env:ENABLE_DIAGNOSTICS = "true"
-cd backend
-python launcher.py
-```
-
-**Windows CMD:**
-```cmd
-set ENABLE_DIAGNOSTICS=true
-cd backend
-python launcher.py
-```
-
-### Method 3: Inline with Command
-
-**Linux/Mac:**
-```bash
-ENABLE_DIAGNOSTICS=true python backend/launcher.py
-```
-
-**Windows PowerShell:**
-```powershell
-$env:ENABLE_DIAGNOSTICS="true"; python backend/launcher.py
-```
+**Note**: Diagnostic mode is automatically disabled by default. Only enable when troubleshooting issues, as it impacts performance.
 
 ## What Gets Logged
 
@@ -180,11 +149,13 @@ curl http://localhost:8077/diagnostics
 
 Use the included test script to reproduce the timeout issue:
 
-```bash
-# Start server with diagnostics
-export ENABLE_DIAGNOSTICS=true
-python backend/launcher.py
+**Step 1: Start server with diagnostics**
+1. Launch GUI: `python backend/launcher.py -gui`
+2. Enable "Diagnostic Mode" checkbox in Settings
+3. Click "Save Settings" then "Start Server"
 
+**Step 2: Run diagnostic test**
+```bash
 # In another terminal, run test
 python backend/test_diagnostic.py
 ```
@@ -307,20 +278,12 @@ Both use request IDs (e.g., `[a3b4c5d6]`) for correlation.
 
 ## Disabling Diagnostic Mode
 
-Remove or set environment variable:
+1. Open GUI: `python backend/launcher.py -gui`
+2. Uncheck "Enable Diagnostic Mode" checkbox
+3. Click "Save Settings"
+4. Restart server
 
-```bash
-# Linux/Mac
-unset ENABLE_DIAGNOSTICS
-
-# Windows PowerShell
-Remove-Item Env:ENABLE_DIAGNOSTICS
-
-# Windows CMD
-set ENABLE_DIAGNOSTICS=
-```
-
-Or restart server without the environment variable.
+The setting is saved in `backend/settings.json` and will persist across restarts.
 
 ## Architecture
 
@@ -359,12 +322,14 @@ This is separate from JobManager.lock and won't cause deadlocks.
 
 ## Example Diagnostic Session
 
-```bash
-# Terminal 1: Start server with diagnostics
-$ export ENABLE_DIAGNOSTICS=true
-$ cd backend
-$ python launcher.py
+**Terminal 1: Start server with diagnostics via GUI**
+1. Run: `python backend/launcher.py -gui`
+2. Check "Enable Diagnostic Mode" in Settings
+3. Click "Save Settings"
+4. Click "Start Server"
 
+You'll see:
+```
 === Simple Page Saver Backend Starting ===
 ================================================================================
 DIAGNOSTIC MODE ENABLED
@@ -375,10 +340,12 @@ INFO:     Started server process [12345]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8077
+```
 
-# Terminal 2: Run diagnostic test
-$ cd backend
-$ python test_diagnostic.py
+**Terminal 2: Run diagnostic test**
+```bash
+cd backend
+python test_diagnostic.py
 
 ================================================================================
   TEST 1: Initial Health Check
@@ -459,12 +426,132 @@ Once you've identified the issue using diagnostics:
 6. **Verify Fix**: Re-run test_diagnostic.py
 7. **Disable Diagnostics**: Remove environment variable for normal operation
 
+## Conversion Logging (NEW)
+
+**Version 2.2+** includes comprehensive logging and timeout protection for HTML conversion:
+
+### What Gets Logged
+
+**Conversion Chain:**
+```
+[CONVERSION START] HTML size: 12345 chars, Title: 'Example Page'
+[CONVERSION] API key available: False
+[CONVERSION] No API key - skipping AI conversion
+[CONVERSION] Attempting Trafilatura extraction...
+[Trafilatura] Starting with 30s timeout
+[Trafilatura] Running in thread: 139876543210
+[Trafilatura] Starting extraction with mode: balanced
+[Trafilatura] HTML size: 12345 chars
+[Trafilatura] Calling trafilatura.extract()...
+[Trafilatura] trafilatura.extract() completed in 0.52s
+[Trafilatura] Extracted text length: 3456 chars
+[Trafilatura] Final output: 3456 chars
+[Trafilatura] Completed successfully within timeout
+[CONVERSION] Trafilatura SUCCESS - 3456 chars
+```
+
+**If Trafilatura Fails/Times Out:**
+```
+[CONVERSION] Attempting html2text fallback...
+[html2text] Starting with 30s timeout
+[html2text] Running in thread: 139876543210
+[html2text] Starting html2text conversion
+[html2text] HTML size: 12345 chars
+[html2text] Calling self.html2text_converter.handle()...
+[html2text] handle() completed in 1.23s
+[html2text] Output text length: 4567 chars
+[html2text] Final markdown length: 4567 chars
+[html2text] Completed successfully within timeout
+[CONVERSION] html2text SUCCESS - 4567 chars
+```
+
+**If Conversion Hangs (Timeout):**
+```
+[html2text] Calling self.html2text_converter.handle()...
+[html2text] TIMEOUT after 30s - operation did not complete
+[html2text] This indicates html2text.handle() is hanging indefinitely
+[html2text] HTML may contain problematic content causing infinite loop
+[CONVERSION] html2text TIMEOUT after 30s
+```
+
+### Timeout Protection
+
+Each conversion method has a 30-second timeout:
+- **Trafilatura**: 30s timeout (configurable)
+- **html2text**: 30s timeout (configurable)
+- **AI conversion**: 60s timeout (built-in via requests library)
+
+**Benefits:**
+- Server never hangs indefinitely on problematic HTML
+- Clear error messages indicate which conversion method timed out
+- Allows graceful error handling instead of complete freeze
+
+### Interpreting Conversion Logs
+
+**Normal Operation:**
+1. Logs show method entry with HTML size
+2. Logs show library call (trafilatura.extract() or html2text.handle())
+3. Logs show completion time and output size
+4. Total time < 30 seconds
+
+**Hanging Conversion (Bug):**
+1. Logs show method entry with HTML size
+2. Logs show library call starting
+3. **NO logs for 30+ seconds** - indicates library hanging inside native code
+4. Timeout error logged with diagnostic message
+
+**If You See Timeouts:**
+1. Check which conversion method timed out (Trafilatura or html2text)
+2. Save the problematic HTML to a file for analysis
+3. Check backend logs for patterns (specific HTML tags, sizes, structures)
+4. Try with different extraction_mode ('recall', 'precision', 'balanced')
+5. Report issue with sample HTML (sanitized if needed)
+
+### Debugging Conversion Hangs
+
+If conversion consistently times out:
+
+**Step 1: Enable diagnostic mode**
+1. Open GUI: `python backend/launcher.py -gui`
+2. Check "Enable Diagnostic Mode" checkbox
+3. Click "Save Settings"
+4. Click "Start Server"
+
+**Step 2: Capture full logs**
+
+Option A - Via GUI:
+- Click "View Logs" button to see real-time output
+- Logs are automatically saved to `backend/logs/simple_page_saver_*.log`
+
+Option B - Direct launch with log capture:
+1. Enable diagnostic mode in GUI first (saves to settings.json)
+2. Stop GUI server
+3. Run: `python backend/launcher.py 2>&1 | tee conversion_debug.log`
+
+**Step 3: Run test with problematic HTML**
+- Use extension to extract the problematic page
+- Or run `python backend/test_diagnostic.py`
+
+**Step 4: Analyze logs**
+- Last log line before timeout shows exact hang point
+- HTML size and characteristics help identify pattern
+- Thread ID shows if it's blocking main thread or worker
+- Check GUI's "View Diagnostic Report" for current state
+
+**Step 5: Mitigations**
+- Adjust timeout (increase if HTML is very large)
+- Try different extraction_mode (Balanced/Recall/Precision)
+- Pre-process HTML to remove problematic elements
+- Use AI conversion instead of fallbacks (if available)
+
 ## Support
 
 If diagnostics reveal an issue you can't resolve:
 
 1. Save diagnostic report: `curl http://localhost:8077/diagnostics > diagnostic_report.json`
 2. Save server logs: `backend/logs/simple_page_saver_*.log`
-3. Include test script output
-4. Document exact steps to reproduce
-5. Note server configuration (workers, port, OS, Python version)
+3. Save conversion debug logs (if using new logging)
+4. Include test script output
+5. Document exact steps to reproduce
+6. Note server configuration (workers, port, OS, Python version)
+7. If possible, include sanitized sample of problematic HTML
