@@ -426,59 +426,62 @@ Once you've identified the issue using diagnostics:
 6. **Verify Fix**: Re-run test_diagnostic.py
 7. **Disable Diagnostics**: Remove environment variable for normal operation
 
-## Conversion Logging (NEW)
+## Conversion Logging (FIXED - Version 2.4+)
 
-**Version 2.2+** includes comprehensive logging and timeout protection for HTML conversion.
+**Logging is now ALWAYS ENABLED and fully async-safe!**
 
-**IMPORTANT**: Conversion logs are written to a **separate, standalone log file** to avoid lock conflicts with the main logging system:
-- **Log file**: `backend/logs/conversion_debug_YYYYMMDD.log`
-- Independent from main logs and GUI console
-- Thread-safe and buffered to prevent blocking
-- Automatically created when first conversion runs
-- Check this file to see detailed conversion progress and identify hang points
+### Non-Blocking Logging Implementation
+
+The backend now uses **QueueHandler + QueueListener** pattern (FastAPI best practice for async applications):
+
+**How it works:**
+- **QueueHandler**: Non-blocking handler that just pushes log messages into a queue (microseconds)
+- **QueueListener**: Separate background thread pulls from queue and writes to disk
+- **FileHandler/StreamHandler**: Run in listener's thread, never block the main event loop
+- **Lifecycle Management**: FastAPI lifespan context manager starts/stops listener properly
+
+**Benefits:**
+- ✓ Zero blocking - logging never blocks async operations
+- ✓ Thread-safe - queue handles concurrent access automatically
+- ✓ Always enabled - no need to enable/disable, no performance impact
+- ✓ Complete logs - can debug crashes and hangs with full visibility
+- ✓ Graceful shutdown - all queued messages flushed on exit
 
 ### What Gets Logged
 
+**ALL conversion activity is logged to:** `backend/logs/simple_page_saver_YYYYMMDD.log`
+
 **Conversion Chain:**
 ```
-[CONVERSION START] HTML size: 12345 chars, Title: 'Example Page'
-[CONVERSION] API key available: False
-[CONVERSION] No API key - skipping AI conversion
-[CONVERSION] Attempting Trafilatura extraction...
-[Trafilatura] Starting with 30s timeout
-[Trafilatura] Running in thread: 139876543210
-[Trafilatura] Starting extraction with mode: balanced
-[Trafilatura] HTML size: 12345 chars
-[Trafilatura] Calling trafilatura.extract()...
-[Trafilatura] trafilatura.extract() completed in 0.52s
-[Trafilatura] Extracted text length: 3456 chars
-[Trafilatura] Final output: 3456 chars
-[Trafilatura] Completed successfully within timeout
-[CONVERSION] Trafilatura SUCCESS - 3456 chars
+[2025-01-11 14:30:45] [INFO] [simple_page_saver.ai_converter] [CONVERSION START] HTML size: 12345 chars, Title: 'Example Page'
+[2025-01-11 14:30:45] [INFO] [simple_page_saver.ai_converter] [CONVERSION] API key available: False
+[2025-01-11 14:30:45] [INFO] [simple_page_saver.ai_converter] [CONVERSION] No API key - skipping AI conversion
+[2025-01-11 14:30:45] [INFO] [simple_page_saver.ai_converter] [CONVERSION] Attempting Trafilatura extraction...
+[2025-01-11 14:30:45] [INFO] [simple_page_saver.ai_converter] [Trafilatura] Starting with 30s timeout
+[2025-01-11 14:30:45] [INFO] [simple_page_saver.ai_converter] [Trafilatura] Calling trafilatura.extract()...
+[2025-01-11 14:30:46] [INFO] [simple_page_saver.ai_converter] [Trafilatura] trafilatura.extract() completed in 0.52s
+[2025-01-11 14:30:46] [INFO] [simple_page_saver.ai_converter] [Trafilatura] Extracted text length: 3456 chars
+[2025-01-11 14:30:46] [INFO] [simple_page_saver.ai_converter] [CONVERSION] Trafilatura SUCCESS - 3456 chars
 ```
 
-**If Trafilatura Fails/Times Out:**
+**If Trafilatura Fails, Falls Back to html2text:**
 ```
-[CONVERSION] Attempting html2text fallback...
-[html2text] Starting with 30s timeout
-[html2text] Running in thread: 139876543210
-[html2text] Starting html2text conversion
-[html2text] HTML size: 12345 chars
-[html2text] Calling self.html2text_converter.handle()...
-[html2text] handle() completed in 1.23s
-[html2text] Output text length: 4567 chars
-[html2text] Final markdown length: 4567 chars
-[html2text] Completed successfully within timeout
-[CONVERSION] html2text SUCCESS - 4567 chars
+[2025-01-11 14:30:45] [INFO] [simple_page_saver.ai_converter] [CONVERSION] Attempting html2text fallback...
+[2025-01-11 14:30:45] [INFO] [simple_page_saver.ai_converter] [html2text] Starting with 30s timeout
+[2025-01-11 14:30:45] [INFO] [simple_page_saver.ai_converter] [html2text] Calling self.html2text_converter.handle()...
+[2025-01-11 14:30:46] [INFO] [simple_page_saver.ai_converter] [html2text] handle() completed in 1.23s
+[2025-01-11 14:30:46] [INFO] [simple_page_saver.ai_converter] [html2text] Output text length: 4567 chars
+[2025-01-11 14:30:46] [INFO] [simple_page_saver.ai_converter] [CONVERSION] html2text SUCCESS - 4567 chars
 ```
 
-**If Conversion Hangs (Timeout):**
+**If Conversion Hangs (Timeout Protection Triggers):**
 ```
-[html2text] Calling self.html2text_converter.handle()...
-[html2text] TIMEOUT after 30s - operation did not complete
-[html2text] This indicates html2text.handle() is hanging indefinitely
-[html2text] HTML may contain problematic content causing infinite loop
-[CONVERSION] html2text TIMEOUT after 30s
+[2025-01-11 14:30:45] [INFO] [simple_page_saver.ai_converter] [html2text] Calling self.html2text_converter.handle()...
+... 30 seconds of silence (no more logs) ...
+[2025-01-11 14:31:15] [ERROR] [simple_page_saver.ai_converter] [html2text] TIMEOUT after 30s - operation did not complete
+[2025-01-11 14:31:15] [ERROR] [simple_page_saver.ai_converter] [html2text] This indicates html2text.handle() is hanging indefinitely
+[2025-01-11 14:31:15] [ERROR] [simple_page_saver.ai_converter] [html2text] HTML may contain problematic content causing infinite loop
+[2025-01-11 14:31:15] [ERROR] [simple_page_saver.ai_converter] [CONVERSION] html2text TIMEOUT after 30s
 ```
 
 ### Timeout Protection
@@ -524,23 +527,24 @@ If conversion consistently times out:
 3. Click "Save Settings"
 4. Click "Start Server"
 
-**Step 2: Capture full logs**
+**Step 2: Check log file**
 
-Conversion logs are written to standalone file:
-- **Conversion logs**: `backend/logs/conversion_debug_YYYYMMDD.log` (automatic)
-- **Main server logs**: `backend/logs/simple_page_saver_YYYYMMDD.log` (automatic)
-- **Diagnostic logs**: Shown in GUI console if diagnostic mode enabled
+All logs (conversion, main server, diagnostic) are written to one file:
+- **Log file**: `backend/logs/simple_page_saver_YYYYMMDD.log` (always enabled)
+- **Non-blocking**: QueueHandler ensures logging never blocks operations
+- **Complete**: Contains all conversion details, errors, and timing
 
 **Step 3: Run test with problematic HTML**
 - Use extension to extract the problematic page
 - Or run `python backend/test_diagnostic.py`
 
 **Step 4: Analyze logs**
-- **Check conversion_debug_YYYYMMDD.log FIRST** - shows exact conversion progress
+- **Check simple_page_saver_YYYYMMDD.log** - contains everything
+- Search for `[simple_page_saver.ai_converter]` to see conversion activity
 - Last log line before timeout shows exact hang point
 - HTML size and characteristics help identify pattern
 - Thread name shows if it's blocking main thread or worker
-- Check GUI's "View Diagnostic Report" for current state
+- Check GUI's "View Diagnostic Report" for current state (if diagnostic mode enabled)
 
 **Step 5: Mitigations**
 - Adjust timeout (increase if HTML is very large)
@@ -552,10 +556,11 @@ Conversion logs are written to standalone file:
 
 If diagnostics reveal an issue you can't resolve:
 
-1. Save diagnostic report: `curl http://localhost:8077/diagnostics > diagnostic_report.json`
-2. **Save conversion debug logs**: `backend/logs/conversion_debug_YYYYMMDD.log` (CRITICAL for conversion hangs)
-3. Save server logs: `backend/logs/simple_page_saver_YYYYMMDD.log`
-4. Include test script output
-5. Document exact steps to reproduce
-6. Note server configuration (workers, port, OS, Python version)
-7. If possible, include sanitized sample of problematic HTML
+1. Save diagnostic report (if diagnostic mode enabled): `curl http://localhost:8077/diagnostics > diagnostic_report.json`
+2. **Save complete log file**: `backend/logs/simple_page_saver_YYYYMMDD.log` (contains everything)
+3. Include test script output if using `test_diagnostic.py`
+4. Document exact steps to reproduce
+5. Note server configuration (workers, port, OS, Python version)
+6. If possible, include sanitized sample of problematic HTML
+
+The log file contains all conversion details, errors, timing, and diagnostic information in one place.

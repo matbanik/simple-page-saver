@@ -1,12 +1,20 @@
 """
 Logging configuration for Simple Page Saver
-Handles file logging with configurable levels and API key masking
+Implements non-blocking async-safe logging using QueueHandler and QueueListener
+Best practice for FastAPI/async applications to avoid blocking the event loop
 """
 
 import logging
+import logging.handlers
+import queue
 import re
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
+
+
+# Global queue listener instance (managed by lifespan)
+_queue_listener: Optional[logging.handlers.QueueListener] = None
 
 
 class APIKeyMaskingFilter(logging.Filter):
@@ -35,17 +43,23 @@ class APIKeyMaskingFilter(logging.Filter):
 
 def setup_logging(log_level: str = 'INFO', log_file: str = None):
     """
-    Set up logging configuration
+    Set up non-blocking async-safe logging configuration
+    Uses QueueHandler + QueueListener for async compatibility
 
     Args:
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        log_file: Path to log file (default: logs/app.log)
+        log_file: Path to log file (default: logs/simple_page_saver_YYYYMMDD.log)
 
     Returns:
         Configured logger instance
+
+    Note:
+        Must call start_queue_listener() after setup and stop_queue_listener() on shutdown
     """
-    # Create logs directory if it doesn't exist
-    log_dir = Path('logs')
+    global _queue_listener
+
+    # Create logs directory if it doesn't exist (CRITICAL: must exist before FileHandler creation)
+    log_dir = Path(__file__).parent / 'logs'
     log_dir.mkdir(exist_ok=True)
 
     # Default log file with timestamp
@@ -58,18 +72,23 @@ def setup_logging(log_level: str = 'INFO', log_file: str = None):
     # Configure logging level
     level = getattr(logging, log_level.upper(), logging.INFO)
 
-    # Create logger
+    # Create root logger
     logger = logging.getLogger('simple_page_saver')
     logger.setLevel(level)
+    logger.propagate = False  # Don't propagate to root logger
 
     # Remove existing handlers
     logger.handlers.clear()
 
-    # Create file handler
+    # ============================================================================
+    # BLOCKING HANDLERS (will run in QueueListener's background thread)
+    # ============================================================================
+
+    # Create file handler (BLOCKING - but will run in background thread)
     file_handler = logging.FileHandler(log_file, encoding='utf-8')
     file_handler.setLevel(level)
 
-    # Create console handler
+    # Create console handler (BLOCKING - but will run in background thread)
     console_handler = logging.StreamHandler()
     console_handler.setLevel(level)
 
@@ -87,13 +106,61 @@ def setup_logging(log_level: str = 'INFO', log_file: str = None):
     file_handler.addFilter(api_key_filter)
     console_handler.addFilter(api_key_filter)
 
-    # Add handlers to logger
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
+    # ============================================================================
+    # NON-BLOCKING QUEUE-BASED LOGGING
+    # ============================================================================
 
-    logger.info(f'Logging initialized - Level: {log_level}, File: {log_file}')
+    # Create queue for non-blocking logging
+    log_queue = queue.Queue(-1)  # Unbounded queue
+
+    # Create QueueHandler (NON-BLOCKING - just puts messages in queue)
+    queue_handler = logging.handlers.QueueHandler(log_queue)
+    queue_handler.setLevel(level)
+
+    # Add queue handler to logger (this is what the app will use)
+    logger.addHandler(queue_handler)
+
+    # Create QueueListener (will run blocking handlers in background thread)
+    # IMPORTANT: This processes messages from queue in separate thread
+    _queue_listener = logging.handlers.QueueListener(
+        log_queue,
+        file_handler,
+        console_handler,
+        respect_handler_level=True
+    )
+
+    # Log setup completion (will be async/non-blocking)
+    logger.info(f'Non-blocking logging initialized - Level: {log_level}, File: {log_file}')
+    logger.info(f'QueueHandler + QueueListener running in background thread')
 
     return logger
+
+
+def start_queue_listener():
+    """
+    Start the queue listener background thread
+    Call this during application startup (FastAPI lifespan startup)
+    """
+    global _queue_listener
+    if _queue_listener:
+        _queue_listener.start()
+        print("[Logging] QueueListener started - non-blocking logging active")
+    else:
+        print("[Logging WARNING] QueueListener not initialized - call setup_logging() first")
+
+
+def stop_queue_listener():
+    """
+    Stop the queue listener background thread
+    Call this during application shutdown (FastAPI lifespan shutdown)
+    Ensures all queued log messages are written before exit
+    """
+    global _queue_listener
+    if _queue_listener:
+        _queue_listener.stop()
+        print("[Logging] QueueListener stopped - all queued messages flushed")
+    else:
+        print("[Logging WARNING] QueueListener not initialized")
 
 
 def log_ai_request(logger, model: str, prompt_size: int, request_data: dict):

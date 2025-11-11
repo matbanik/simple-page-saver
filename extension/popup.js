@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Set up event listeners
     document.getElementById('refresh-jobs').addEventListener('click', loadJobs);
+    document.getElementById('clear-completed-jobs').addEventListener('click', clearCompletedJobs);
     document.getElementById('extract-current').addEventListener('click', extractCurrentPage);
     document.getElementById('map-site').addEventListener('click', mapSite);
     document.getElementById('extract-selected').addEventListener('click', extractSelectedPages);
@@ -96,6 +97,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Refresh jobs periodically
     setInterval(loadJobs, 5000); // Every 5 seconds
+
+    // Listen for storage changes from other tabs
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName === 'local' && changes.activeJobs) {
+            console.log('[Jobs] Storage changed in another tab, updating UI');
+            displayJobs(changes.activeJobs.newValue || []);
+        }
+    });
 });
 
 // Extract current page
@@ -673,8 +682,10 @@ async function loadJobs() {
 function displayJobs(jobs) {
     const jobsList = document.getElementById('jobs-list');
     const jobsSection = document.getElementById('jobs-section');
+    const clearButton = document.getElementById('clear-completed-jobs');
 
-    // Filter for active or recent jobs
+    // Show ALL jobs (processing, pending, recently completed/failed)
+    // Only filter out old completed jobs (> 1 hour)
     const relevantJobs = jobs.filter(job =>
         job.status === 'processing' ||
         job.status === 'pending' ||
@@ -684,8 +695,15 @@ function displayJobs(jobs) {
 
     if (relevantJobs.length === 0) {
         jobsSection.style.display = 'none';
+        clearButton.style.display = 'none';
         return;
     }
+
+    // Show "Clear Completed" button if there are completed/failed jobs
+    const hasCompletedJobs = relevantJobs.some(job =>
+        job.status === 'completed' || job.status === 'failed'
+    );
+    clearButton.style.display = hasCompletedJobs ? 'inline-block' : 'none';
 
     jobsSection.style.display = 'block';
     jobsList.innerHTML = '';
@@ -694,6 +712,9 @@ function displayJobs(jobs) {
         const jobItem = createJobElement(job);
         jobsList.appendChild(jobItem);
     });
+
+    // Store jobs in chrome.storage for cross-tab access
+    chrome.storage.local.set({ activeJobs: relevantJobs });
 }
 
 // Create job element
@@ -706,10 +727,16 @@ function createJobElement(job) {
     const statusText = job.status.charAt(0).toUpperCase() + job.status.slice(1);
     const progress = job.progress || { current: 0, total: 0, message: '', percent: 0 };
 
+    // Show remove button for completed/failed jobs
+    const showRemoveButton = job.status === 'completed' || job.status === 'failed';
+
     div.innerHTML = `
         <div class="job-header">
-            <div class="job-title" title="${title}">${truncate(title, 40)}</div>
-            <div class="job-status ${job.status}">${statusText}</div>
+            <div class="job-title" title="${title}">${truncate(title, 35)}</div>
+            <div style="display: flex; align-items: center;">
+                <div class="job-status ${job.status}">${statusText}</div>
+                ${showRemoveButton ? '<button class="job-remove" title="Remove from list">×</button>' : ''}
+            </div>
         </div>
         ${progress.message ? `<div class="job-progress">${progress.message}</div>` : ''}
         ${job.status === 'processing' || job.status === 'pending' ? `
@@ -720,7 +747,23 @@ function createJobElement(job) {
         <div class="job-time">${getTimeAgo(job.created_at)}</div>
     `;
 
-    div.addEventListener('click', () => handleJobClick(job));
+    // Add click handler for job details (not on remove button)
+    div.addEventListener('click', (e) => {
+        if (!e.target.classList.contains('job-remove')) {
+            handleJobClick(job);
+        }
+    });
+
+    // Add click handler for remove button
+    if (showRemoveButton) {
+        const removeBtn = div.querySelector('.job-remove');
+        if (removeBtn) {
+            removeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                removeJob(job.id);
+            });
+        }
+    }
 
     return div;
 }
@@ -749,6 +792,44 @@ function isRecent(timestamp) {
     const time = new Date(timestamp);
     const now = new Date();
     return (now - time) < 3600000; // 1 hour in milliseconds
+}
+
+// Remove a single job from the UI (client-side only, doesn't delete from backend)
+async function removeJob(jobId) {
+    console.log('[Jobs] Removing job from UI:', jobId);
+
+    // Get current jobs from storage
+    const storage = await chrome.storage.local.get(['activeJobs']);
+    const activeJobs = storage.activeJobs || [];
+
+    // Filter out the job
+    const updatedJobs = activeJobs.filter(job => job.id !== jobId);
+
+    // Update storage and UI
+    await chrome.storage.local.set({ activeJobs: updatedJobs });
+    displayJobs(updatedJobs);
+
+    showStatus('Job removed from list', 'info');
+}
+
+// Clear all completed/failed jobs
+async function clearCompletedJobs() {
+    console.log('[Jobs] Clearing completed jobs');
+
+    // Get current jobs from storage
+    const storage = await chrome.storage.local.get(['activeJobs']);
+    const activeJobs = storage.activeJobs || [];
+
+    // Filter to keep only processing/pending jobs
+    const activeOnlyJobs = activeJobs.filter(job =>
+        job.status === 'processing' || job.status === 'pending'
+    );
+
+    // Update storage and UI
+    await chrome.storage.local.set({ activeJobs: activeOnlyJobs });
+    displayJobs(activeOnlyJobs);
+
+    showStatus('Completed jobs cleared', 'info');
 }
 
 // Helper: Get time ago string
