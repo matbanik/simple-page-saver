@@ -304,8 +304,21 @@ async def process_html(request: ProcessHTMLRequest):
             if request.custom_prompt:
                 metadata_extra['custom_prompt'] = True
                 logger.info(f"Using custom prompt (length: {len(request.custom_prompt)} chars)")
+
+            # Get chunking settings from settings manager
+            worker_count = settings.get('worker_count', 4)
+            overlap_percentage = settings.get('overlap_percentage', 10) / 100.0  # Convert from percentage to decimal
+            extraction_strategy = settings.get('extraction_strategy', 'markdown')
+
             log_ai_request(logger, settings.get('default_model'), len(cleaned_html), metadata_extra)
-            markdown, used_ai, error = request_converter.convert_large_html(cleaned_html, request.title, request.custom_prompt)
+            markdown, used_ai, error = request_converter.convert_large_html(
+                cleaned_html,
+                request.title,
+                request.custom_prompt,
+                extraction_strategy=extraction_strategy,
+                worker_count=worker_count,
+                overlap_percentage=overlap_percentage
+            )
             log_ai_response(logger, settings.get('default_model'), len(markdown), used_ai, error)
 
         # Step 5: Generate filename from title or URL

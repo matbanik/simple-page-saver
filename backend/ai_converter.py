@@ -551,83 +551,211 @@ Guidelines:
 
         return chunks
 
-    def convert_large_html(self, html: str, title: str = "", custom_prompt: str = "") -> Tuple[str, bool, Optional[str]]:
+    def convert_large_html(self, html: str, title: str = "", custom_prompt: str = "", extraction_strategy: str = "markdown", worker_count: int = 4, overlap_percentage: float = 0.1) -> Tuple[str, bool, Optional[str]]:
         """
-        Convert large HTML by chunking if necessary
+        Convert large HTML with intelligent chunking and parallel processing
+        COMPLETE OVERHAUL - Inspired by Crawl4AI architecture
 
         Args:
             html: HTML string
             title: Page title
             custom_prompt: Optional custom instructions for AI processing
+            extraction_strategy: 'markdown', 'structured', or 'combined'
+            worker_count: Number of parallel workers (default 4)
+            overlap_percentage: Chunk overlap percentage (default 0.1 = 10%)
 
         Returns:
-            Tuple of (markdown_content, used_ai, error_message)
+            Tuple of (content, used_ai, error_message)
+            - For 'markdown': content is markdown string
+            - For 'structured': content is JSON string
+            - For 'combined': content is JSON with both formats
         """
-        from preprocessing import count_tokens
+        from token_manager import TokenManager
+        from chunking import SmartChunker
+        from parallel_processor import ParallelChunkProcessor, ChunkResult
+        from extraction_strategies import get_strategy
+        from result_merger import ResultMerger
+        from processing_monitor import ProcessingMonitor
+
+        # Initialize components
+        token_mgr = TokenManager(self.api_key)
+        monitor = ProcessingMonitor()
+        monitor.start_processing()
 
         # Extract model name for tokenizer
         model_name = self.model.split('/')[-1] if '/' in self.model else self.model
 
-        # Calculate precise overhead tokens
-        system_tokens = count_tokens(self.SYSTEM_PROMPT, model_name)
-        custom_tokens = count_tokens(custom_prompt, model_name) if custom_prompt else 0
-        title_tokens = count_tokens(f"\nPage Title: {title}", model_name) if title else 0
-        overhead_tokens = system_tokens + custom_tokens + title_tokens
+        # Calculate token budget
+        budget = token_mgr.calculate_token_budget(
+            model_id=self.model,
+            system_prompt=self.SYSTEM_PROMPT,
+            custom_prompt=custom_prompt,
+            title=title,
+            output_tokens=4000,
+            safety_margin=0.95
+        )
 
-        # Get model-specific context limit
-        max_context = self.get_model_context_limit()
+        logger.info(f"[Processing] Token budget: {budget['max_input_tokens']} tokens available for input")
+        print(f"[Processing] Token budget: {budget['max_input_tokens']} input tokens (max context: {budget['max_context']})")
 
-        # Reserve space for output (4000) and overhead
-        # Max input: model_context - 4K output - overhead
-        max_input_tokens = max_context - 4000 - overhead_tokens
+        # Count HTML tokens
+        html_tokens = token_mgr.count_tokens(html, model_name)
 
-        # Count tokens in HTML
-        html_tokens = count_tokens(html, model_name)
-
-        logger.info(f"[Chunking Check] HTML: {html_tokens}, Max: {max_input_tokens}, Overhead: {overhead_tokens}")
-
-        if html_tokens <= max_input_tokens:
+        # Check if chunking is needed
+        if html_tokens <= budget['max_input_tokens']:
+            logger.info(f"[Processing] No chunking needed: {html_tokens} <= {budget['max_input_tokens']}")
+            print(f"[Processing] No chunking needed: {html_tokens} tokens")
             return self.convert_to_markdown(html, title, custom_prompt)
 
-        # Need to chunk - determine chunk size
-        # Target 80% of max to leave some room for variation
-        target_tokens_per_chunk = int(max_input_tokens * 0.8)
+        # Chunking required
+        logger.info(f"[Processing] Chunking required: {html_tokens} > {budget['max_input_tokens']}")
+        print(f"[Processing] Chunking required: {html_tokens} tokens exceeds limit")
 
-        # IMPORTANT: Use conservative character estimate to avoid token-dense content issues
-        # Real-world token density varies: 2-4 chars/token depending on content
-        # Use 2.5 chars/token to be safe (conservative)
-        CONSERVATIVE_CHARS_PER_TOKEN = 2.5
-        max_chars_per_chunk = int(target_tokens_per_chunk * CONSERVATIVE_CHARS_PER_TOKEN)
+        # Create chunker with overlap
+        chunker = SmartChunker(
+            max_tokens=int(budget['max_input_tokens'] * 0.8),  # Target 80% of max for safety
+            model_name=model_name,
+            overlap_percentage=overlap_percentage
+        )
 
-        logger.info(f"[Chunking] Target: {target_tokens_per_chunk} tokens/chunk, Max chars: {max_chars_per_chunk}")
-        print(f"[Chunking] HTML too large ({html_tokens} tokens), splitting into chunks of ~{target_tokens_per_chunk} tokens ({max_chars_per_chunk} chars)")
+        # Chunk the HTML
+        chunks, chunking_metadata = chunker.chunk_with_preallocation(html)
+        monitor.set_chunking_metadata(chunking_metadata)
 
-        chunks = self.chunk_html(html, max_chars=max_chars_per_chunk)
-        markdown_parts = []
-        used_ai = False
-        errors = []
+        logger.info(f"[Processing] Created {len(chunks)} chunks using {chunking_metadata['strategy']}")
+        print(f"[Processing] Split into {len(chunks)} chunks (strategy: {chunking_metadata['strategy']})")
 
-        for i, chunk in enumerate(chunks):
-            chunk_tokens = count_tokens(chunk, model_name)
-            logger.info(f"[Chunking] Processing chunk {i+1}/{len(chunks)}: {len(chunk)} chars, {chunk_tokens} tokens")
-            print(f"Processing chunk {i+1}/{len(chunks)} ({chunk_tokens} tokens)")
+        # Check for oversized chunks
+        if chunking_metadata['oversized_chunks']:
+            error_msg = f"Chunking failed: {len(chunking_metadata['oversized_chunks'])} chunks exceed token limit"
+            logger.error(f"[Processing] {error_msg}")
+            print(f"[Processing] ERROR: {error_msg}")
+            return "", False, error_msg
 
-            # Safety check: If chunk is still too large, split it further
-            if chunk_tokens > max_input_tokens:
-                logger.error(f"[Chunking] Chunk {i+1} is STILL too large ({chunk_tokens} tokens)! Skipping...")
-                errors.append(f"Chunk {i+1}: Too large ({chunk_tokens} tokens) even after chunking")
-                continue
+        # Setup extraction strategy
+        strategy = get_strategy(extraction_strategy, instruction=custom_prompt)
 
-            md, ai_used, error = self.convert_to_markdown(chunk, title if i == 0 else "", custom_prompt)
-            markdown_parts.append(md)
-            used_ai = used_ai or ai_used
-            if error:
-                errors.append(f"Chunk {i+1}: {error}")
+        # Define chunk processing function
+        def process_single_chunk(chunk_idx: int, chunk: str, args: dict) -> ChunkResult:
+            """Process a single chunk (called by parallel processor)"""
+            start_time = time.time()
 
-        full_markdown = "\n\n---\n\n".join(markdown_parts)
+            try:
+                # Count input tokens
+                input_tokens = token_mgr.count_tokens(chunk, model_name)
+
+                # Build prompt using strategy
+                chunk_title = title if chunk_idx == 0 else ""
+                prompts = strategy.build_prompt(chunk, chunk_title, chunk_idx, len(chunks))
+
+                # Convert chunk to markdown (the underlying method handles AI/fallback)
+                md, ai_used, error = self.convert_to_markdown(chunk, chunk_title, custom_prompt)
+
+                if error:
+                    raise Exception(error)
+
+                # Post-process using strategy
+                md = strategy.post_process(md, chunk_idx)
+
+                # Count output tokens
+                output_tokens = token_mgr.count_tokens(md, model_name)
+
+                processing_time = time.time() - start_time
+
+                # Record metrics
+                monitor.record_chunk_result(
+                    chunk_index=chunk_idx,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    processing_time=processing_time,
+                    success=True,
+                    error=None,
+                    strategy_used=strategy.__class__.__name__
+                )
+
+                return ChunkResult(
+                    chunk_index=chunk_idx,
+                    success=True,
+                    output=md,
+                    error=None,
+                    tokens_processed=input_tokens,
+                    processing_time=processing_time,
+                    used_ai=ai_used
+                )
+
+            except Exception as e:
+                processing_time = time.time() - start_time
+
+                monitor.record_chunk_result(
+                    chunk_index=chunk_idx,
+                    input_tokens=0,
+                    output_tokens=0,
+                    processing_time=processing_time,
+                    success=False,
+                    error=str(e),
+                    strategy_used=strategy.__class__.__name__
+                )
+
+                return ChunkResult(
+                    chunk_index=chunk_idx,
+                    success=False,
+                    output=None,
+                    error=str(e),
+                    tokens_processed=0,
+                    processing_time=processing_time,
+                    used_ai=False
+                )
+
+        # Process chunks in parallel
+        parallel_processor = ParallelChunkProcessor(max_workers=worker_count)
+        results, parallel_metadata = parallel_processor.process_chunks(
+            chunks=chunks,
+            process_func=process_single_chunk,
+            process_args={}
+        )
+
+        # Merge results based on extraction strategy
+        successful_outputs = [r.output for r in results if r.success and r.output]
+
+        if not successful_outputs:
+            error_msg = "All chunks failed to process"
+            logger.error(f"[Processing] {error_msg}")
+            print(f"[Processing] ERROR: {error_msg}")
+            return "", False, error_msg
+
+        merger = ResultMerger(overlap_percentage=overlap_percentage)
+
+        if extraction_strategy == 'structured':
+            # Merge JSON blocks
+            merge_result = merger.merge_json_chunks(successful_outputs)
+        elif extraction_strategy == 'combined':
+            # Merge combined format
+            combined = merger.merge_combined_chunks(successful_outputs)
+            merge_result = None  # Handle differently below
+        else:
+            # Default: merge markdown
+            merge_result = merger.merge_markdown_chunks(successful_outputs)
+
+        if merge_result:
+            logger.info(f"[Processing] Merged {merge_result.chunk_count} chunks, removed {merge_result.overlap_removed} overlap")
+
+        # Collect final metrics
+        final_metrics = monitor.get_metrics(self.model)
+        monitor.print_summary(final_metrics)
+
+        # Check if any AI was used
+        used_ai = any(r.used_ai for r in results)
+
+        # Collect errors
+        errors = [f"Chunk {r.chunk_index+1}: {r.error}" for r in results if not r.success]
         error_msg = "; ".join(errors) if errors else None
 
-        return full_markdown, used_ai, error_msg
+        # Return appropriate content based on strategy
+        if extraction_strategy == 'combined':
+            import json
+            return json.dumps(combined, indent=2), used_ai, error_msg
+        else:
+            return merge_result.combined_text, used_ai, error_msg
 
 
 def estimate_cost(html: str, model: str = 'deepseek/deepseek-chat') -> dict:

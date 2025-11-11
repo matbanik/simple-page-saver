@@ -75,6 +75,30 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log('[Settings] Extraction mode saved:', e.target.value);
     });
 
+    // Load chunking settings
+    await loadChunkingSettings();
+
+    // Save chunking settings on change
+    document.getElementById('worker-count').addEventListener('change', async (e) => {
+        const value = parseInt(e.target.value);
+        if (value >= 1 && value <= 16) {
+            await chrome.storage.local.set({ workerCount: value });
+            console.log('[Settings] Worker count saved:', value);
+            // Also save to backend settings
+            await saveBackendSetting('worker_count', value);
+        }
+    });
+
+    document.getElementById('overlap-percentage').addEventListener('change', async (e) => {
+        const value = parseInt(e.target.value);
+        if (value >= 0 && value <= 50) {
+            await chrome.storage.local.set({ overlapPercentage: value });
+            console.log('[Settings] Overlap percentage saved:', value);
+            // Also save to backend settings
+            await saveBackendSetting('overlap_percentage', value);
+        }
+    });
+
     // Load saved custom prompt
     const storage = await chrome.storage.local.get(['customPrompt']);
     const customPromptTextarea = document.getElementById('custom-prompt');
@@ -391,6 +415,61 @@ async function loadExtractionMode() {
     document.getElementById('extraction-mode').value = extractionMode;
 
     console.log('[Settings] Extraction mode:', extractionMode);
+}
+
+// Load chunking settings
+async function loadChunkingSettings() {
+    // Try to load from backend settings first
+    try {
+        const backendUrl = await getBackendUrl();
+        const response = await fetch(`${backendUrl}/settings`);
+        if (response.ok) {
+            const settings = await response.json();
+            const workerCount = settings.worker_count || 4;
+            const overlapPercentage = settings.overlap_percentage || 10;
+
+            document.getElementById('worker-count').value = workerCount;
+            document.getElementById('overlap-percentage').value = overlapPercentage;
+
+            // Save to local storage
+            await chrome.storage.local.set({ workerCount, overlapPercentage });
+
+            console.log('[Settings] Chunking settings loaded from backend:', { workerCount, overlapPercentage });
+            return;
+        }
+    } catch (error) {
+        console.log('[Settings] Could not load from backend, using local storage:', error.message);
+    }
+
+    // Fallback to local storage
+    const storage = await chrome.storage.local.get(['workerCount', 'overlapPercentage']);
+    const workerCount = storage.workerCount || 4;
+    const overlapPercentage = storage.overlapPercentage || 10;
+
+    document.getElementById('worker-count').value = workerCount;
+    document.getElementById('overlap-percentage').value = overlapPercentage;
+
+    console.log('[Settings] Chunking settings loaded from local storage:', { workerCount, overlapPercentage });
+}
+
+// Save a setting to the backend
+async function saveBackendSetting(key, value) {
+    try {
+        const backendUrl = await getBackendUrl();
+        const response = await fetch(`${backendUrl}/settings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [key]: value })
+        });
+
+        if (response.ok) {
+            console.log(`[Settings] Saved ${key}=${value} to backend`);
+        } else {
+            console.warn(`[Settings] Failed to save ${key} to backend:`, response.statusText);
+        }
+    } catch (error) {
+        console.warn(`[Settings] Could not save ${key} to backend:`, error.message);
+    }
 }
 
 // Handle AI toggle

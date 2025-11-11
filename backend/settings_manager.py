@@ -57,6 +57,9 @@ class SettingsManager:
             'default_model': 'deepseek/deepseek-chat',
             'max_tokens': 32000,
             'log_level': 'INFO',
+            'worker_count': 4,
+            'overlap_percentage': 10,
+            'extraction_strategy': 'markdown',
             'openrouter_api_key_encrypted': None,
             '_salt': None
         }
