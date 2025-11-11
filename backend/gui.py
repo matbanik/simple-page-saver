@@ -110,6 +110,16 @@ class ServerGUI:
         self.log_level_combo.grid(row=row, column=1, sticky=tk.W, pady=5)
         row += 1
 
+        # Diagnostic Mode Checkbox
+        self.diagnostic_mode_var = tk.BooleanVar()
+        self.diagnostic_check = ttk.Checkbutton(
+            main_frame,
+            text="Enable Diagnostic Mode (detailed monitoring for troubleshooting)",
+            variable=self.diagnostic_mode_var
+        )
+        self.diagnostic_check.grid(row=row, column=0, columnspan=2, sticky=tk.W, pady=5)
+        row += 1
+
         # Save Settings Button
         self.save_btn = ttk.Button(main_frame, text="Save Settings", command=self.save_settings)
         self.save_btn.grid(row=row, column=0, columnspan=2, pady=10)
@@ -175,6 +185,10 @@ class ServerGUI:
         self.test_ai_btn = ttk.Button(test_button_frame, text="Test AI Connection",
                                       command=self.test_ai_connection, width=20)
         self.test_ai_btn.grid(row=0, column=1, padx=5, pady=2)
+
+        self.diagnostic_report_btn = ttk.Button(test_button_frame, text="View Diagnostic Report",
+                                                command=self.view_diagnostic_report, width=20)
+        self.diagnostic_report_btn.grid(row=0, column=2, padx=5, pady=2)
         row += 1
 
         # Log Output
@@ -210,6 +224,7 @@ class ServerGUI:
         self.model_var.set(self.settings_manager.get('default_model', 'deepseek/deepseek-chat'))
         self.max_tokens_var.set(str(self.settings_manager.get('max_tokens', 32000)))
         self.log_level_var.set(self.settings_manager.get('log_level', 'INFO'))
+        self.diagnostic_mode_var.set(self.settings_manager.get('diagnostic_mode', False))
 
         api_key = self.settings_manager.get_api_key()
         if api_key:
@@ -237,9 +252,12 @@ class ServerGUI:
             self.settings_manager.set('default_model', self.model_var.get())
             self.settings_manager.set('max_tokens', max_tokens)
             self.settings_manager.set('log_level', self.log_level_var.get())
+            self.settings_manager.set('diagnostic_mode', self.diagnostic_mode_var.get())
             self.settings_manager.set_api_key(self.api_key_var.get())
 
             self.log_message("Settings saved successfully")
+            if self.diagnostic_mode_var.get():
+                self.log_message("⚠️  Diagnostic mode enabled - detailed logging active")
             messagebox.showinfo("Success", "Settings saved successfully!")
 
         except ValueError as e:
@@ -306,11 +324,24 @@ class ServerGUI:
                 if not Path(python_exe).exists():
                     python_exe = sys.executable
 
+            # Set up environment variables
+            import os
+            env = os.environ.copy()
+
+            # Enable diagnostic mode if checkbox is checked
+            diagnostic_mode = self.settings_manager.get('diagnostic_mode', False)
+            if diagnostic_mode:
+                env['ENABLE_DIAGNOSTICS'] = 'true'
+                self.log_message("🔍 Diagnostic mode enabled - detailed monitoring active")
+            else:
+                env['ENABLE_DIAGNOSTICS'] = 'false'
+
             self.server_process = subprocess.Popen(
                 [python_exe, 'main.py'],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                cwd=Path(__file__).parent
+                cwd=Path(__file__).parent,
+                env=env
             )
 
             # Wait a moment and check status
@@ -415,6 +446,113 @@ class ServerGUI:
             messagebox.showerror("Error", "Cannot connect to backend. Is it running?")
         except Exception as e:
             self.log_message(f"Error testing AI: {str(e)}")
+            messagebox.showerror("Error", f"Error: {str(e)}")
+
+    def view_diagnostic_report(self):
+        """View diagnostic status report"""
+        port = int(self.port_var.get())
+        url = f"http://localhost:{port}/diagnostics"
+
+        self.log_message("Fetching diagnostic report...")
+
+        try:
+            response = requests.get(url, timeout=10)
+
+            if response.status_code == 200:
+                data = response.json()
+
+                self.log_message("=" * 80)
+                self.log_message("DIAGNOSTIC REPORT")
+                self.log_message("=" * 80)
+                self.log_message(f"Uptime: {data.get('uptime_seconds', 0):.1f}s")
+                self.log_message(f"Active Threads: {data.get('active_threads', 0)}")
+                self.log_message(f"Thread Names: {', '.join(data.get('thread_names', []))}")
+                self.log_message(f"Requests In Progress: {data.get('requests_in_progress', 0)}")
+
+                in_progress = data.get('in_progress_details', [])
+                if in_progress:
+                    self.log_message(f"\n⚠️  WARNING: {len(in_progress)} requests still in progress!")
+                    import time
+                    for req in in_progress:
+                        elapsed = time.time() - req.get('start_time', 0)
+                        self.log_message(f"  - {req.get('endpoint')}: {elapsed:.1f}s elapsed")
+                else:
+                    self.log_message("✓ No requests in progress (healthy)")
+
+                completed = data.get('completed_requests_count', 0)
+                self.log_message(f"\nCompleted Requests: {completed}")
+
+                recent = data.get('recent_requests', [])
+                if recent:
+                    self.log_message(f"\nRecent Requests:")
+                    for req in recent[-5:]:
+                        status = req.get('status')
+                        duration = req.get('duration', 0)
+                        endpoint = req.get('endpoint')
+                        status_icon = "✓" if status == "success" else "✗"
+                        self.log_message(f"  {status_icon} {endpoint}: {status} ({duration:.2f}s)")
+
+                locks = data.get('active_locks', {})
+                total_locks = sum(locks.values())
+                self.log_message(f"\nActive Locks: {total_locks}")
+
+                if total_locks > 0:
+                    self.log_message("⚠️  WARNING: Locks are still held!")
+                    for lock_name, count in locks.items():
+                        self.log_message(f"  - {lock_name}: {count} holders")
+
+                    import time
+                    lock_details = data.get('lock_details', {})
+                    if lock_details:
+                        for lock_name, entries in lock_details.items():
+                            self.log_message(f"  Lock: {lock_name}")
+                            for entry in entries:
+                                elapsed = time.time() - entry.get('acquired_time', entry.get('acquire_time', 0))
+                                self.log_message(f"    Thread {entry.get('thread_id')}: {entry.get('status')} ({elapsed:.1f}s)")
+                else:
+                    self.log_message("✓ No active locks (healthy)")
+
+                self.log_message("=" * 80)
+
+                # Show summary in messagebox
+                if in_progress or total_locks > 0:
+                    messagebox.showwarning(
+                        "Diagnostic Report - Issues Detected",
+                        f"⚠️  Potential Issues Detected!\n\n"
+                        f"Requests In Progress: {len(in_progress)}\n"
+                        f"Active Locks: {total_locks}\n\n"
+                        f"See log for details."
+                    )
+                else:
+                    messagebox.showinfo(
+                        "Diagnostic Report - Healthy",
+                        f"✓ System Healthy\n\n"
+                        f"Uptime: {data.get('uptime_seconds', 0):.1f}s\n"
+                        f"Active Threads: {data.get('active_threads', 0)}\n"
+                        f"Completed Requests: {completed}\n"
+                        f"No hanging requests or locks"
+                    )
+
+            elif response.status_code == 404:
+                self.log_message("✗ Diagnostic mode not enabled on server")
+                self.log_message("Enable 'Diagnostic Mode' checkbox, save settings, and restart server")
+                messagebox.showwarning(
+                    "Diagnostics Not Enabled",
+                    "Diagnostic mode is not enabled.\n\n"
+                    "To enable:\n"
+                    "1. Check 'Enable Diagnostic Mode' checkbox\n"
+                    "2. Click 'Save Settings'\n"
+                    "3. Restart the server"
+                )
+            else:
+                self.log_message(f"Request failed with status {response.status_code}")
+                messagebox.showerror("Error", f"Request failed: {response.status_code}")
+
+        except requests.exceptions.ConnectionError:
+            self.log_message("Cannot connect to backend - is it running?")
+            messagebox.showerror("Error", "Cannot connect to backend. Is it running?")
+        except Exception as e:
+            self.log_message(f"Error fetching diagnostic report: {str(e)}")
             messagebox.showerror("Error", f"Error: {str(e)}")
 
 
