@@ -10,6 +10,7 @@ from typing import Optional, List
 from contextlib import asynccontextmanager
 import os
 import re
+import logging
 
 from preprocessing import HTMLPreprocessor, estimate_tokens
 from ai_converter import AIConverter, estimate_cost
@@ -31,20 +32,34 @@ except ImportError:
     diagnostic_monitor = None
     track_request = None
 
-# Initialize settings and logging
+# Initialize settings
 settings = SettingsManager()
-logger = setup_logging(log_level=settings.get('log_level', 'INFO'))
+
+# Check if logging is enabled
+ENABLE_LOGGING = os.getenv('ENABLE_LOGGING', 'true').lower() == 'true'
+
+if ENABLE_LOGGING:
+    logger = setup_logging(log_level=settings.get('log_level', 'INFO'))
+else:
+    # Create a dummy logger that does nothing
+    logger = logging.getLogger('simple_page_saver')
+    logger.addHandler(logging.NullHandler())
+    print("[WARNING] Logging is DISABLED - running without log files for debugging")
 
 # Export settings as environment variables for compatibility
 env_vars = settings.export_for_env()
 for key, value in env_vars.items():
     os.environ[key] = value
 
-logger.info("=== Simple Page Saver Backend Starting ===")
-logger.info(f"Server Port: {settings.get('server_port')}")
-logger.info(f"Default Model: {settings.get('default_model')}")
-logger.info(f"Log Level: {settings.get('log_level')}")
-logger.info(f"API Key Configured: {bool(settings.get_api_key())}")
+if ENABLE_LOGGING:
+    logger.info("=== Simple Page Saver Backend Starting ===")
+    logger.info(f"Server Port: {settings.get('server_port')}")
+    logger.info(f"Default Model: {settings.get('default_model')}")
+    logger.info(f"Log Level: {settings.get('log_level')}")
+    logger.info(f"API Key Configured: {bool(settings.get_api_key())}")
+else:
+    print("=== Simple Page Saver Backend Starting (Logging DISABLED) ===")
+    print(f"Server Port: {settings.get('server_port')}")
 
 
 @asynccontextmanager
@@ -53,22 +68,32 @@ async def lifespan(app: FastAPI):
     FastAPI lifespan context manager
     Handles startup and shutdown of background services like the logging queue listener
     """
-    # Startup: Start the queue listener for non-blocking logging
-    start_queue_listener()
-    logger.info("Application startup complete - all background services running")
+    # Startup: Start the queue listener for non-blocking logging (only if logging enabled)
+    if ENABLE_LOGGING:
+        start_queue_listener()
+        logger.info("Application startup complete - all background services running")
 
-    if ENABLE_DIAGNOSTICS and diagnostic_monitor:
-        logger.info("="*80)
-        logger.info("DIAGNOSTIC MODE ENABLED")
-        logger.info("Detailed request lifecycle and lock monitoring is active")
-        logger.info("Performance may be impacted - disable for production")
-        logger.info("="*80)
+        if ENABLE_DIAGNOSTICS and diagnostic_monitor:
+            logger.info("="*80)
+            logger.info("DIAGNOSTIC MODE ENABLED")
+            logger.info("Detailed request lifecycle and lock monitoring is active")
+            logger.info("Performance may be impacted - disable for production")
+            logger.info("="*80)
+    else:
+        print("Application startup complete (logging disabled)")
+        if ENABLE_DIAGNOSTICS and diagnostic_monitor:
+            print("="*80)
+            print("DIAGNOSTIC MODE ENABLED")
+            print("="*80)
 
     yield
 
-    # Shutdown: Stop the queue listener and flush remaining log messages
-    logger.info("Application shutting down - stopping background services...")
-    stop_queue_listener()
+    # Shutdown: Stop the queue listener and flush remaining log messages (only if logging enabled)
+    if ENABLE_LOGGING:
+        logger.info("Application shutting down - stopping background services...")
+        stop_queue_listener()
+    else:
+        print("Application shutting down")
 
 
 app = FastAPI(
