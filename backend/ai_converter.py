@@ -84,10 +84,26 @@ Guidelines:
         """
         Get the context window limit for the current model
 
+        Priority:
+        1. Query OpenRouter API for real-time model info
+        2. Check local cache
+        3. Fallback to hardcoded limits
+        4. Default to 128K
+
         Returns:
             Maximum context tokens for the model (defaults to 128K if unknown)
         """
-        # Try exact match first
+        # Try querying OpenRouter API for model info
+        if self.api_key:
+            try:
+                context_limit = self._query_openrouter_model_info(self.model)
+                if context_limit:
+                    logger.info(f"[Model Context] OpenRouter API: '{self.model}' has {context_limit} token context")
+                    return context_limit
+            except Exception as e:
+                logger.warning(f"[Model Context] Failed to query OpenRouter API: {e}")
+
+        # Try exact match in hardcoded limits
         if self.model in self.MODEL_CONTEXT_LIMITS:
             return self.MODEL_CONTEXT_LIMITS[self.model]
 
@@ -100,6 +116,40 @@ Guidelines:
         # Default to conservative 128K for unknown models
         logger.warning(f"[Model Context] Unknown model '{self.model}', defaulting to 128K context limit")
         return 128000
+
+    def _query_openrouter_model_info(self, model_id: str) -> Optional[int]:
+        """
+        Query OpenRouter API for model context length
+
+        Args:
+            model_id: Model identifier (e.g., 'anthropic/claude-3-sonnet')
+
+        Returns:
+            Context length in tokens, or None if not found
+        """
+        try:
+            url = "https://openrouter.ai/api/v1/models"
+            headers = {
+                "Authorization": f"Bearer {self.api_key}"
+            }
+
+            response = requests.get(url, headers=headers, timeout=5)
+
+            if response.status_code == 200:
+                models = response.json().get('data', [])
+
+                # Find matching model
+                for model in models:
+                    if model.get('id') == model_id:
+                        context_length = model.get('context_length')
+                        if context_length:
+                            return int(context_length)
+                        break
+
+            return None
+        except Exception as e:
+            logger.debug(f"[Model Context] OpenRouter API query failed: {e}")
+            return None
 
     def convert_to_markdown(self, html: str, title: str = "", custom_prompt: str = "") -> Tuple[str, bool, Optional[str]]:
         """
@@ -426,7 +476,7 @@ Guidelines:
     def chunk_html(self, html: str, max_chars: int = 80000) -> list:
         """
         Split HTML into chunks if too large
-        Splits at major heading boundaries
+        Splits at paragraph/newline boundaries for better semantic coherence
 
         Args:
             html: HTML string
@@ -438,32 +488,66 @@ Guidelines:
         if len(html) <= max_chars:
             return [html]
 
-        from bs4 import BeautifulSoup
+        logger.info(f"[Chunking] Splitting {len(html)} chars into chunks of max {max_chars} chars")
 
-        soup = BeautifulSoup(html, 'lxml')
+        # Split by paragraphs first (double newlines), then single newlines
+        # This preserves semantic boundaries better than HTML structure parsing
+        paragraphs = html.split('\n\n')
+
         chunks = []
         current_chunk = []
         current_size = 0
 
-        # Find all top-level elements
-        body = soup.find('body') or soup
-        for element in body.children:
-            if hasattr(element, 'name'):
-                element_str = str(element)
-                element_size = len(element_str)
+        for para in paragraphs:
+            para_size = len(para) + 2  # +2 for the \n\n we'll add back
 
-                # If adding this element would exceed max_chars and we have content, start new chunk
-                if current_size + element_size > max_chars and current_chunk:
-                    chunks.append(''.join(current_chunk))
-                    current_chunk = [element_str]
-                    current_size = element_size
-                else:
-                    current_chunk.append(element_str)
-                    current_size += element_size
+            # If this single paragraph is larger than max_chars, split it further
+            if para_size > max_chars:
+                # Save current chunk if it has content
+                if current_chunk:
+                    chunks.append('\n\n'.join(current_chunk))
+                    current_chunk = []
+                    current_size = 0
+
+                # Split large paragraph by sentences/lines
+                lines = para.split('\n')
+                temp_chunk = []
+                temp_size = 0
+
+                for line in lines:
+                    line_size = len(line) + 1  # +1 for \n
+
+                    if temp_size + line_size > max_chars and temp_chunk:
+                        # Flush temp chunk
+                        chunks.append('\n'.join(temp_chunk))
+                        temp_chunk = [line]
+                        temp_size = line_size
+                    else:
+                        temp_chunk.append(line)
+                        temp_size += line_size
+
+                # Add remaining lines
+                if temp_chunk:
+                    chunks.append('\n'.join(temp_chunk))
+
+            # Normal paragraph - check if adding it would exceed limit
+            elif current_size + para_size > max_chars and current_chunk:
+                # Start new chunk
+                chunks.append('\n\n'.join(current_chunk))
+                current_chunk = [para]
+                current_size = para_size
+            else:
+                # Add to current chunk
+                current_chunk.append(para)
+                current_size += para_size
 
         # Add remaining chunk
         if current_chunk:
-            chunks.append(''.join(current_chunk))
+            chunks.append('\n\n'.join(current_chunk))
+
+        logger.info(f"[Chunking] Created {len(chunks)} chunks")
+        for i, chunk in enumerate(chunks):
+            logger.info(f"[Chunking] Chunk {i+1}: {len(chunk)} chars")
 
         return chunks
 
