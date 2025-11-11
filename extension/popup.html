@@ -373,6 +373,22 @@
             margin-top: 2px;
         }
 
+        .job-remove {
+            background: none;
+            border: none;
+            color: #999;
+            cursor: pointer;
+            padding: 0;
+            margin-left: 4px;
+            font-size: 14px;
+            line-height: 1;
+            transition: color 0.2s;
+        }
+
+        .job-remove:hover {
+            color: #f44336;
+        }
+
         .no-jobs {
             text-align: center;
             color: #999;
@@ -392,9 +408,12 @@
 
     <!-- Active Jobs Section -->
     <div id="jobs-section" class="section" style="display: none;">
-        <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+        <div class="section-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
             <span>📋 Active Jobs</span>
-            <button id="refresh-jobs" style="padding: 2px 8px; font-size: 11px; background: #e0e0e0; border: none; border-radius: 3px; cursor: pointer;">Refresh</button>
+            <div style="display: flex; gap: 4px;">
+                <button id="clear-completed-jobs" style="padding: 2px 8px; font-size: 11px; background: #ffebee; color: #c62828; border: none; border-radius: 3px; cursor: pointer; display: none;">Clear Completed</button>
+                <button id="refresh-jobs" style="padding: 2px 8px; font-size: 11px; background: #e0e0e0; border: none; border-radius: 3px; cursor: pointer;">Refresh</button>
+            </div>
         </div>
         <div id="jobs-list"></div>
     </div>
