@@ -154,7 +154,7 @@ Guidelines:
     def convert_to_markdown(self, html: str, title: str = "", custom_prompt: str = "") -> Tuple[str, bool, Optional[str]]:
         """
         Convert HTML to Markdown using AI or fallback chain
-        Fallback order: AI → Trafilatura → html2text
+        Fallback order: AI -> Trafilatura -> html2text
 
         Args:
             html: Preprocessed HTML string

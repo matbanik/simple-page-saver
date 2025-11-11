@@ -101,7 +101,7 @@ class TokenManager:
         # Fuzzy match
         for known_model, limit in self.MODEL_CONTEXT_LIMITS.items():
             if known_model in model_id or model_id in known_model:
-                logger.info(f"[TokenManager] Fuzzy matched '{model_id}' → '{known_model}': {limit}")
+                logger.info(f"[TokenManager] Fuzzy matched '{model_id}' -> '{known_model}': {limit}")
                 self._model_cache[model_id] = limit
                 return limit
 
