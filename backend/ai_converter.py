@@ -144,22 +144,32 @@ Guidelines:
 
         user_prompt = "\n".join(user_prompt_parts)
 
-        # Validate request size before sending
-        # Conservative estimate: system prompt ~800 tokens, user prompt from chars/3, output 4000
-        from preprocessing import estimate_tokens
-        system_tokens = 800
-        user_tokens = estimate_tokens(user_prompt)
-        output_tokens = 4000
-        total_tokens = system_tokens + user_tokens + output_tokens
+        # Validate request size before sending - use PRECISE token counting
+        from preprocessing import count_tokens
+
+        # Extract model name for tokenizer (normalize OpenRouter format)
+        model_name = self.model.split('/')[-1] if '/' in self.model else self.model
+
+        # Count exact tokens in the actual payloads
+        system_tokens = count_tokens(self.SYSTEM_PROMPT, model_name)
+        user_tokens = count_tokens(user_prompt, model_name)
+        output_tokens = 4000  # What we're requesting in max_tokens
+
+        # Total tokens = input (system + user) + output
+        input_tokens = system_tokens + user_tokens
+        total_tokens = input_tokens + output_tokens
+
+        logger.info(f"[Token Count] System: {system_tokens}, User: {user_tokens}, Output: {output_tokens}, Total: {total_tokens}")
+        print(f"[Token Count] Input: {input_tokens}, Output: {output_tokens}, Total: {total_tokens}")
 
         # Most models have 128K-256K context limits
-        # Use 240K as safe maximum to account for tokenization variations
-        MAX_CONTEXT_TOKENS = 240000
+        # Use 250K as maximum to stay within limits (no buffer needed - we're precise now)
+        MAX_CONTEXT_TOKENS = 250000
 
         if total_tokens > MAX_CONTEXT_TOKENS:
             raise ValueError(
-                f"Content too large: ~{total_tokens} tokens exceeds {MAX_CONTEXT_TOKENS} limit. "
-                f"Please use chunking for large content."
+                f"Content too large: {total_tokens} tokens (input: {input_tokens}, output: {output_tokens}) "
+                f"exceeds {MAX_CONTEXT_TOKENS} limit. Please use chunking for large content."
             )
 
         payload = {
@@ -246,6 +256,9 @@ Guidelines:
         Intelligent content extraction using Trafilatura (internal, no timeout)
         Supports three extraction modes: balanced, recall, precision
         """
+        from copy import deepcopy
+        from trafilatura.settings import DEFAULT_CONFIG
+
         # Configure extraction based on mode
         favor_recall = self.extraction_mode == 'recall'
         favor_precision = self.extraction_mode == 'precision'
@@ -255,6 +268,13 @@ Guidelines:
         logger.info(f"[Trafilatura] favor_recall={favor_recall}, favor_precision={favor_precision}")
         print(f"[Trafilatura] Extracting with mode: {self.extraction_mode}")
         print(f"  favor_recall={favor_recall}, favor_precision={favor_precision}")
+
+        # Create custom config to fix spacing issues
+        # Issue: MIN_EXTRACTED_SIZE default of 250 causes word bunching
+        # Solution: Lower threshold to prevent secondary extraction algorithm
+        config = deepcopy(DEFAULT_CONFIG)
+        config['DEFAULT']['MIN_EXTRACTED_SIZE'] = '100'  # Lower from default 250
+        logger.info("[Trafilatura] Using custom config: MIN_EXTRACTED_SIZE=100 (default: 250)")
 
         # Extract text content using Trafilatura
         logger.info("[Trafilatura] Calling trafilatura.extract()...")
@@ -268,7 +288,8 @@ Guidelines:
             include_links=True,   # Preserve links
             favor_recall=favor_recall,
             favor_precision=favor_precision,
-            output_format='markdown'  # Direct markdown output
+            output_format='markdown',  # Direct markdown output
+            config=config  # Use custom config to fix spacing
         )
 
         elapsed = time.time() - start_time
@@ -279,22 +300,6 @@ Guidelines:
             raise ValueError("Trafilatura extraction returned no content")
 
         logger.info(f"[Trafilatura] Extracted text length: {len(text)} chars")
-
-        # Post-process to fix spacing issues
-        # Trafilatura sometimes bunches words together without spaces
-        import re
-
-        # Add space after price/currency symbols before capital letters or other text
-        text = re.sub(r'(\$[\d,.]+)([A-Z])', r'\1 \2', text)
-
-        # Add space between lowercase and uppercase letters (camelCase boundaries)
-        text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)
-
-        # Add space between text and numbers where missing
-        text = re.sub(r'([a-zA-Z])(\d)', r'\1 \2', text)
-
-        # Add space after common button text patterns
-        text = re.sub(r'(Buy It Now|Add to Cart|Free [Ss]hipping|Free [Dd]elivery|Located in)([A-Z])', r'\1 \2', text)
 
         # Add title if provided and not already present
         if title and not text.startswith(f"# {title}"):
@@ -433,22 +438,49 @@ Guidelines:
         Returns:
             Tuple of (markdown_content, used_ai, error_message)
         """
-        # Check if chunking is needed
-        # Use conservative estimate: 180K chars ≈ 60K tokens (with 20% safety buffer)
-        # Account for system prompt (~2400 chars) + custom prompt
-        system_overhead = 2400 + len(custom_prompt)
-        max_chars = 180000 - system_overhead
+        from preprocessing import count_tokens
 
-        if len(html) <= max_chars:
+        # Extract model name for tokenizer
+        model_name = self.model.split('/')[-1] if '/' in self.model else self.model
+
+        # Calculate precise overhead tokens
+        system_tokens = count_tokens(self.SYSTEM_PROMPT, model_name)
+        custom_tokens = count_tokens(custom_prompt, model_name) if custom_prompt else 0
+        title_tokens = count_tokens(f"\nPage Title: {title}", model_name) if title else 0
+        overhead_tokens = system_tokens + custom_tokens + title_tokens
+
+        # Reserve space for output (4000) and overhead
+        # Max input: 250K total - 4K output - overhead
+        max_input_tokens = 250000 - 4000 - overhead_tokens
+
+        # Count tokens in HTML
+        html_tokens = count_tokens(html, model_name)
+
+        logger.info(f"[Chunking Check] HTML: {html_tokens}, Max: {max_input_tokens}, Overhead: {overhead_tokens}")
+
+        if html_tokens <= max_input_tokens:
             return self.convert_to_markdown(html, title, custom_prompt)
 
-        chunks = self.chunk_html(html)
+        # Need to chunk - determine chunk size
+        # Target 80% of max to leave some room
+        target_tokens_per_chunk = int(max_input_tokens * 0.8)
+
+        # Estimate characters per chunk (rough but good enough for chunking)
+        # Average ratio from current content
+        chars_per_token = len(html) / html_tokens if html_tokens > 0 else 4
+        max_chars_per_chunk = int(target_tokens_per_chunk * chars_per_token)
+
+        logger.info(f"[Chunking] Splitting into chunks of ~{max_chars_per_chunk} chars ({target_tokens_per_chunk} tokens)")
+        print(f"[Chunking] HTML too large ({html_tokens} tokens), splitting into chunks of ~{target_tokens_per_chunk} tokens")
+
+        chunks = self.chunk_html(html, max_chars=max_chars_per_chunk)
         markdown_parts = []
         used_ai = False
         errors = []
 
         for i, chunk in enumerate(chunks):
-            print(f"Processing chunk {i+1}/{len(chunks)}")
+            chunk_tokens = count_tokens(chunk, model_name)
+            print(f"Processing chunk {i+1}/{len(chunks)} ({chunk_tokens} tokens)")
             md, ai_used, error = self.convert_to_markdown(chunk, title if i == 0 else "", custom_prompt)
             markdown_parts.append(md)
             used_ai = used_ai or ai_used

@@ -283,12 +283,26 @@ class HTMLPreprocessor:
         }
 
 
-def estimate_tokens(text: str) -> int:
+def count_tokens(text: str, model: str = "gpt-3.5-turbo") -> int:
     """
-    Conservative token estimation (1 token ≈ 3 characters for safety)
-    This errs on the side of caution to avoid exceeding model limits
+    Precisely count tokens using tiktoken library
+
+    Args:
+        text: Text to count tokens for
+        model: Model name for tokenizer (default: gpt-3.5-turbo)
+
+    Returns:
+        Exact token count
     """
-    # Use 3 chars per token for more conservative estimates
-    # Add 20% buffer for safety
-    base_estimate = len(text) // 3
-    return int(base_estimate * 1.2)
+    import tiktoken
+
+    try:
+        # Get the encoding for the specific model
+        encoding = tiktoken.encoding_for_model(model)
+    except KeyError:
+        # Fallback to cl100k_base encoding (used by gpt-3.5-turbo, gpt-4, etc.)
+        encoding = tiktoken.get_encoding("cl100k_base")
+
+    # Count tokens precisely
+    tokens = encoding.encode(text)
+    return len(tokens)

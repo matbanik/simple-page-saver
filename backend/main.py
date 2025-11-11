@@ -3,7 +3,7 @@ FastAPI Backend for Simple Page Saver
 Main application with REST API endpoints, logging, and settings management
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
@@ -12,7 +12,7 @@ import os
 import re
 import logging
 
-from preprocessing import HTMLPreprocessor, estimate_tokens
+from preprocessing import HTMLPreprocessor, count_tokens
 from ai_converter import AIConverter, estimate_cost
 from settings_manager import SettingsManager
 from logging_config import setup_logging, start_queue_listener, stop_queue_listener, log_ai_request, log_ai_response
@@ -270,10 +270,10 @@ async def process_html(request: ProcessHTMLRequest):
 
         job.update_progress(1, 4, 'Preprocessing complete')
 
-        # Step 2: Estimate tokens
-        token_count = estimate_tokens(cleaned_html)
-        prep_metadata['estimated_tokens'] = token_count
-        logger.debug(f"Estimated tokens: {token_count}")
+        # Step 2: Count tokens precisely
+        token_count = count_tokens(cleaned_html)
+        prep_metadata['token_count'] = token_count
+        logger.debug(f"Token count: {token_count}")
 
         # Step 3: Extract media links
         job.update_progress(2, 4, 'Extracting links...')
@@ -296,8 +296,8 @@ async def process_html(request: ProcessHTMLRequest):
             log_ai_request(logger, "fallback", len(cleaned_html), {})
             markdown, used_ai, error = request_converter.convert_to_markdown(cleaned_html, request.title, "")
             log_ai_response(logger, "fallback", len(markdown), False, error)
-        elif token_count > 60000:  # Conservative threshold for chunking to avoid exceeding model limits
-            logger.warning(f"Large content ({token_count} tokens exceeds 60K threshold), using chunking")
+        elif token_count > 200000:  # Chunking threshold: 200K tokens (we count precisely now, leaving room for overhead)
+            logger.warning(f"Large content ({token_count} tokens exceeds 200K threshold), using chunking")
             metadata_extra = {'chunked': True}
             if request.custom_prompt:
                 metadata_extra['custom_prompt'] = True
