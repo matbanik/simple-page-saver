@@ -17,102 +17,12 @@ import threading
 
 load_dotenv()
 
-# Setup optional standalone logging for conversion debugging
-# IMPORTANT: Logging is DISABLED by default to avoid blocking I/O
-# Set environment variable ENABLE_CONVERSION_LOGGING=true to enable detailed logs
-def setup_conversion_logger():
-    """Create optional independent logger for conversion debugging"""
-    import os
+# Use child logger of main 'simple_page_saver' logger for proper hierarchy
+# This automatically inherits the QueueHandler setup from main logger (non-blocking!)
+logger = logging.getLogger('simple_page_saver.ai_converter')
 
-    # Check if conversion logging is enabled
-    if os.getenv('ENABLE_CONVERSION_LOGGING', 'false').lower() != 'true':
-        return None
-
-    try:
-        from pathlib import Path
-        from datetime import datetime
-        import logging.handlers
-
-        # Create logs directory if it doesn't exist
-        log_dir = Path(__file__).parent / 'logs'
-        log_dir.mkdir(exist_ok=True)
-
-        # Create dedicated conversion log file
-        timestamp = datetime.now().strftime('%Y%m%d')
-        log_file = log_dir / f'conversion_debug_{timestamp}.log'
-
-        # Create independent logger
-        conv_logger = logging.getLogger('conversion_debug')
-        conv_logger.setLevel(logging.INFO)
-        conv_logger.propagate = False  # Don't propagate to parent loggers
-
-        # Remove any existing handlers to avoid duplicates
-        conv_logger.handlers.clear()
-
-        # Use QueueHandler for non-blocking logging
-        queue_handler = logging.handlers.QueueHandler(logging.handlers.queue.Queue(-1))
-        conv_logger.addHandler(queue_handler)
-
-        # Create file handler in background thread via QueueListener
-        file_handler = logging.FileHandler(log_file, encoding='utf-8', mode='a')
-        file_handler.setLevel(logging.INFO)
-
-        # Simple formatter without unicode
-        formatter = logging.Formatter(
-            '[%(asctime)s] [%(levelname)s] [%(threadName)s] %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-        file_handler.setFormatter(formatter)
-
-        # Start queue listener in background thread
-        listener = logging.handlers.QueueListener(
-            queue_handler.queue,
-            file_handler,
-            respect_handler_level=True
-        )
-        listener.start()
-
-        # Store listener for cleanup
-        conv_logger._listener = listener
-
-        # Log initialization
-        conv_logger.info(f"="*80)
-        conv_logger.info(f"Conversion Debug Logger Initialized")
-        conv_logger.info(f"Log file: {log_file}")
-        conv_logger.info(f"="*80)
-
-        return conv_logger
-    except Exception as e:
-        # If logging setup fails, don't block the application
-        print(f"[WARNING] Failed to setup conversion logger: {e}")
-        return None
-
-logger = setup_conversion_logger()
-
-# Safe logging wrapper
-def log_info(message):
-    """Safely log a message (no-op if logger disabled)"""
-    if logger:
-        try:
-            logger.info(message)
-        except Exception:
-            pass  # Never let logging break the application
-
-def log_warning(message):
-    """Safely log a warning (no-op if logger disabled)"""
-    if logger:
-        try:
-            logger.warning(message)
-        except Exception:
-            pass
-
-def log_error(message, exc_info=False):
-    """Safely log an error (no-op if logger disabled)"""
-    if logger:
-        try:
-            logger.error(message, exc_info=exc_info)
-        except Exception:
-            pass
+# Note: No handler setup needed here - it inherits from parent logger
+# The parent logger uses QueueHandler + QueueListener for non-blocking async-safe logging
 
 
 class AIConverter:
@@ -169,53 +79,53 @@ Guidelines:
         Returns:
             Tuple of (markdown_content, used_ai, error_message)
         """
-        log_info(f"[CONVERSION START] HTML size: {len(html)} chars, Title: '{title}'")
-        log_info(f"[CONVERSION] API key available: {bool(self.api_key)}")
+        logger.info(f"[CONVERSION START] HTML size: {len(html)} chars, Title: '{title}'")
+        logger.info(f"[CONVERSION] API key available: {bool(self.api_key)}")
 
         # Try AI conversion first if API key is available
         if self.api_key:
             try:
-                log_info("[CONVERSION] Attempting AI conversion...")
+                logger.info("[CONVERSION] Attempting AI conversion...")
                 markdown = self._convert_with_ai(html, title, custom_prompt)
-                log_info(f"[CONVERSION] AI conversion SUCCESS - {len(markdown)} chars")
+                logger.info(f"[CONVERSION] AI conversion SUCCESS - {len(markdown)} chars")
                 return markdown, True, None
             except Exception as e:
-                log_warning(f"[CONVERSION] AI conversion FAILED: {e}")
+                logger.warning(f"[CONVERSION] AI conversion FAILED: {e}")
                 print(f"AI conversion failed: {e}. Falling back to Trafilatura.")
                 error_msg = str(e)
         else:
-            log_info("[CONVERSION] No API key - skipping AI conversion")
+            logger.info("[CONVERSION] No API key - skipping AI conversion")
             error_msg = "No API key provided"
 
         # Try Trafilatura extraction
-        log_info("[CONVERSION] Attempting Trafilatura extraction...")
+        logger.info("[CONVERSION] Attempting Trafilatura extraction...")
         try:
             markdown = self._convert_with_trafilatura(html, title, timeout=30)
             if markdown and len(markdown.strip()) > 50:  # Ensure meaningful content
-                log_info(f"[CONVERSION] Trafilatura SUCCESS - {len(markdown)} chars")
+                logger.info(f"[CONVERSION] Trafilatura SUCCESS - {len(markdown)} chars")
                 print(f"Using Trafilatura extraction (mode: {self.extraction_mode})")
                 return markdown, False, error_msg
             else:
-                log_warning(f"[CONVERSION] Trafilatura returned insufficient content: {len(markdown) if markdown else 0} chars")
+                logger.warning(f"[CONVERSION] Trafilatura returned insufficient content: {len(markdown) if markdown else 0} chars")
                 print("Trafilatura extraction returned insufficient content, falling back to html2text")
         except concurrent.futures.TimeoutError:
-            log_error("[CONVERSION] Trafilatura TIMEOUT after 30s")
+            logger.error("[CONVERSION] Trafilatura TIMEOUT after 30s")
             print("Trafilatura timed out after 30s. Falling back to html2text.")
         except Exception as e:
-            log_error(f"[CONVERSION] Trafilatura FAILED: {e}", exc_info=True)
+            logger.error(f"[CONVERSION] Trafilatura FAILED: {e}", exc_info=True)
             print(f"Trafilatura failed: {e}. Falling back to html2text.")
 
         # Final fallback to html2text
-        log_info("[CONVERSION] Attempting html2text fallback...")
+        logger.info("[CONVERSION] Attempting html2text fallback...")
         try:
             markdown = self._convert_with_html2text(html, title, timeout=30)
-            log_info(f"[CONVERSION] html2text SUCCESS - {len(markdown)} chars")
+            logger.info(f"[CONVERSION] html2text SUCCESS - {len(markdown)} chars")
             return markdown, False, error_msg
         except concurrent.futures.TimeoutError:
-            log_error("[CONVERSION] html2text TIMEOUT after 30s")
+            logger.error("[CONVERSION] html2text TIMEOUT after 30s")
             raise TimeoutError("HTML to markdown conversion timed out after 30 seconds")
         except Exception as e:
-            log_error(f"[CONVERSION] html2text FAILED: {e}", exc_info=True)
+            logger.error(f"[CONVERSION] html2text FAILED: {e}", exc_info=True)
             raise
 
     def _convert_with_ai(self, html: str, title: str, custom_prompt: str = "") -> str:
@@ -322,14 +232,14 @@ Guidelines:
         favor_recall = self.extraction_mode == 'recall'
         favor_precision = self.extraction_mode == 'precision'
 
-        log_info(f"[Trafilatura] Starting extraction with mode: {self.extraction_mode}")
-        log_info(f"[Trafilatura] HTML size: {len(html)} chars")
-        log_info(f"[Trafilatura] favor_recall={favor_recall}, favor_precision={favor_precision}")
+        logger.info(f"[Trafilatura] Starting extraction with mode: {self.extraction_mode}")
+        logger.info(f"[Trafilatura] HTML size: {len(html)} chars")
+        logger.info(f"[Trafilatura] favor_recall={favor_recall}, favor_precision={favor_precision}")
         print(f"[Trafilatura] Extracting with mode: {self.extraction_mode}")
         print(f"  favor_recall={favor_recall}, favor_precision={favor_precision}")
 
         # Extract text content using Trafilatura
-        log_info("[Trafilatura] Calling trafilatura.extract()...")
+        logger.info("[Trafilatura] Calling trafilatura.extract()...")
         start_time = time.time()
 
         text = trafilatura.extract(
@@ -344,70 +254,70 @@ Guidelines:
         )
 
         elapsed = time.time() - start_time
-        log_info(f"[Trafilatura] trafilatura.extract() completed in {elapsed:.2f}s")
+        logger.info(f"[Trafilatura] trafilatura.extract() completed in {elapsed:.2f}s")
 
         if not text:
-            log_warning("[Trafilatura] Extraction returned no content")
+            logger.warning("[Trafilatura] Extraction returned no content")
             raise ValueError("Trafilatura extraction returned no content")
 
-        log_info(f"[Trafilatura] Extracted text length: {len(text)} chars")
+        logger.info(f"[Trafilatura] Extracted text length: {len(text)} chars")
 
         # Add title if provided and not already present
         if title and not text.startswith(f"# {title}"):
-            log_info(f"[Trafilatura] Adding title: {title}")
+            logger.info(f"[Trafilatura] Adding title: {title}")
             text = f"# {title}\n\n{text}"
 
         print(f"[Trafilatura] Extracted {len(text)} characters")
-        log_info(f"[Trafilatura] Final output: {len(text)} chars")
+        logger.info(f"[Trafilatura] Final output: {len(text)} chars")
         return text.strip()
 
     def _convert_with_trafilatura(self, html: str, title: str, timeout: int = 30) -> str:
         """
         Trafilatura extraction with timeout protection
         """
-        log_info(f"[Trafilatura] Starting with {timeout}s timeout")
+        logger.info(f"[Trafilatura] Starting with {timeout}s timeout")
         thread_id = threading.current_thread().ident
-        log_info(f"[Trafilatura] Running in thread: {thread_id}")
+        logger.info(f"[Trafilatura] Running in thread: {thread_id}")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(self._convert_with_trafilatura_unsafe, html, title)
             try:
                 result = future.result(timeout=timeout)
-                log_info(f"[Trafilatura] Completed successfully within timeout")
+                logger.info(f"[Trafilatura] Completed successfully within timeout")
                 return result
             except concurrent.futures.TimeoutError:
-                log_error(f"[Trafilatura] TIMEOUT after {timeout}s - operation did not complete")
+                logger.error(f"[Trafilatura] TIMEOUT after {timeout}s - operation did not complete")
                 raise
 
     def _convert_with_html2text_unsafe(self, html: str, title: str) -> str:
         """Final fallback conversion using html2text library (internal, no timeout)"""
-        log_info("[html2text] Starting html2text conversion")
-        log_info(f"[html2text] HTML size: {len(html)} chars")
-        log_info(f"[html2text] Title: '{title}'")
+        logger.info("[html2text] Starting html2text conversion")
+        logger.info(f"[html2text] HTML size: {len(html)} chars")
+        logger.info(f"[html2text] Title: '{title}'")
         print("[html2text] Using basic html2text conversion")
 
         # Add title if provided
         if title:
-            log_info(f"[html2text] Prepending title: {title}")
+            logger.info(f"[html2text] Prepending title: {title}")
             markdown = f"# {title}\n\n"
         else:
             markdown = ""
 
-        log_info("[html2text] Calling self.html2text_converter.handle()...")
+        logger.info("[html2text] Calling self.html2text_converter.handle()...")
         start_time = time.time()
 
         try:
             text = self.html2text_converter.handle(html)
             elapsed = time.time() - start_time
-            log_info(f"[html2text] handle() completed in {elapsed:.2f}s")
-            log_info(f"[html2text] Output text length: {len(text)} chars")
+            logger.info(f"[html2text] handle() completed in {elapsed:.2f}s")
+            logger.info(f"[html2text] Output text length: {len(text)} chars")
         except Exception as e:
             elapsed = time.time() - start_time
-            log_error(f"[html2text] EXCEPTION after {elapsed:.2f}s: {e}", exc_info=True)
+            logger.error(f"[html2text] EXCEPTION after {elapsed:.2f}s: {e}", exc_info=True)
             raise
 
         markdown += text.strip()
-        log_info(f"[html2text] Final markdown length: {len(markdown)} chars")
+        logger.info(f"[html2text] Final markdown length: {len(markdown)} chars")
 
         return markdown
 
@@ -416,21 +326,21 @@ Guidelines:
         html2text conversion with timeout protection
         This is the final fallback when both AI and Trafilatura fail
         """
-        log_info(f"[html2text] Starting with {timeout}s timeout")
+        logger.info(f"[html2text] Starting with {timeout}s timeout")
         thread_id = threading.current_thread().ident
-        log_info(f"[html2text] Running in thread: {thread_id}")
+        logger.info(f"[html2text] Running in thread: {thread_id}")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(self._convert_with_html2text_unsafe, html, title)
             try:
-                log_info("[html2text] Waiting for conversion to complete...")
+                logger.info("[html2text] Waiting for conversion to complete...")
                 result = future.result(timeout=timeout)
-                log_info(f"[html2text] Completed successfully within timeout")
+                logger.info(f"[html2text] Completed successfully within timeout")
                 return result
             except concurrent.futures.TimeoutError:
-                log_error(f"[html2text] TIMEOUT after {timeout}s - operation did not complete")
-                log_error(f"[html2text] This indicates html2text.handle() is hanging indefinitely")
-                log_error(f"[html2text] HTML may contain problematic content causing infinite loop")
+                logger.error(f"[html2text] TIMEOUT after {timeout}s - operation did not complete")
+                logger.error(f"[html2text] This indicates html2text.handle() is hanging indefinitely")
+                logger.error(f"[html2text] HTML may contain problematic content causing infinite loop")
                 raise
 
     def chunk_html(self, html: str, max_chars: int = 80000) -> list:

@@ -7,13 +7,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
+from contextlib import asynccontextmanager
 import os
 import re
 
 from preprocessing import HTMLPreprocessor, estimate_tokens
 from ai_converter import AIConverter, estimate_cost
 from settings_manager import SettingsManager
-from logging_config import setup_logging, log_ai_request, log_ai_response
+from logging_config import setup_logging, start_queue_listener, stop_queue_listener, log_ai_request, log_ai_response
 from job_manager import JobManager, Job
 
 # Import diagnostics if enabled
@@ -45,9 +46,35 @@ logger.info(f"Default Model: {settings.get('default_model')}")
 logger.info(f"Log Level: {settings.get('log_level')}")
 logger.info(f"API Key Configured: {bool(settings.get_api_key())}")
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    FastAPI lifespan context manager
+    Handles startup and shutdown of background services like the logging queue listener
+    """
+    # Startup: Start the queue listener for non-blocking logging
+    start_queue_listener()
+    logger.info("Application startup complete - all background services running")
+
+    if ENABLE_DIAGNOSTICS and diagnostic_monitor:
+        logger.info("="*80)
+        logger.info("DIAGNOSTIC MODE ENABLED")
+        logger.info("Detailed request lifecycle and lock monitoring is active")
+        logger.info("Performance may be impacted - disable for production")
+        logger.info("="*80)
+
+    yield
+
+    # Shutdown: Stop the queue listener and flush remaining log messages
+    logger.info("Application shutting down - stopping background services...")
+    stop_queue_listener()
+
+
 app = FastAPI(
     title="Simple Page Saver API",
     description="Backend service for converting web pages to markdown",
+    lifespan=lifespan  # Register lifespan context manager
     version="1.0.0"
 )
 
