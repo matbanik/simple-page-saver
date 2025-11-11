@@ -4,6 +4,10 @@
 // Import JSZip library for creating ZIP files
 importScripts('jszip.min.js');
 
+// Import screenshot and warnings utilities
+importScripts('screenshot-utils.js');
+importScripts('warnings-tracker.js');
+
 const API_BASE_URL = 'http://localhost:8077';
 const DELAY_AFTER_LOAD = 2000; // Wait 2 seconds after page load for dynamic content
 
@@ -201,13 +205,18 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
         downloadOptions = {
             content: true,
             mediaLinks: false,
-            externalLinks: false
+            externalLinks: false,
+            screenshot: false,
+            preserveColor: false
         };
     }
 
     console.log('[Extract] Starting extraction for:', url);
     console.log('[Extract] Output as ZIP:', outputZip);
     console.log('[Extract] Download options:', downloadOptions);
+
+    // Initialize warnings tracker
+    const warnings = new WarningsTracker();
 
     // Check backend health first
     const health = await checkBackendHealth();
@@ -236,6 +245,15 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
         console.log('[Extract] Waiting for dynamic content...');
         await sleep(DELAY_AFTER_LOAD);
 
+        // Detect infinite scroll before capturing screenshot
+        if (downloadOptions.screenshot) {
+            console.log('[Extract] Checking for infinite scroll...');
+            const infiniteScrollResult = await detectInfiniteScroll(tab.id);
+            if (infiniteScrollResult.hasInfiniteScroll) {
+                warnings.addInfiniteScrollWarning(url, infiniteScrollResult.confidence);
+            }
+        }
+
         // Extract HTML from the page
         console.log('[Extract] Extracting HTML...');
         const pageData = await extractPageData(tab.id);
@@ -243,6 +261,33 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
 
         let result = null;
         let externalLinks = [];
+        let screenshotData = null;
+
+        // Capture screenshot if requested
+        if (downloadOptions.screenshot) {
+            try {
+                console.log('[Extract] Capturing screenshot...');
+                const screenshotResult = await captureFullPageScreenshot(tab.id, {
+                    preserveColor: downloadOptions.preserveColor || false,
+                    format: 'webp',  // Use WebP for better compression
+                    quality: 85
+                });
+
+                screenshotData = screenshotResult;
+
+                // Add any screenshot warnings
+                if (screenshotResult.warnings && screenshotResult.warnings.length > 0) {
+                    screenshotResult.warnings.forEach(msg => {
+                        warnings.addGeneric('screenshot', msg);
+                    });
+                }
+
+                console.log('[Extract] Screenshot captured successfully');
+            } catch (error) {
+                console.error('[Extract] Screenshot capture failed:', error);
+                warnings.addScreenshotFailure(url, error);
+            }
+        }
 
         // Process with backend if content is requested
         if (downloadOptions.content) {
@@ -301,14 +346,44 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
             });
         }
 
+        // Add screenshot if captured
+        if (screenshotData && screenshotData.dataUrl) {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const pageTitle = pageData.title.replace(/[^a-z0-9]/gi, '_').substring(0, 50);
+            const screenshotFilename = `screenshot_${pageTitle}_${timestamp}.${screenshotData.format}`;
+
+            filesToDownload.push({
+                content: screenshotData.dataUrl,
+                filename: screenshotFilename,
+                isDataUrl: true  // Flag to handle data URLs differently
+            });
+        }
+
+        // Add warnings.txt if there are any warnings
+        if (warnings.hasWarnings()) {
+            const warningsText = warnings.exportAsText();
+            filesToDownload.push({
+                content: warningsText,
+                filename: 'warnings.txt'
+            });
+            console.log(`[Extract] ${warnings.count()} warnings will be included in download`);
+        }
+
         // Download based on ZIP preference
         if (outputZip && filesToDownload.length > 0) {
             // Create ZIP file with selected files
             console.log('[Extract] Creating ZIP file with', filesToDownload.length, 'files...');
             const zip = new JSZip();
-            filesToDownload.forEach(file => {
-                zip.file(file.filename, file.content);
-            });
+
+            for (const file of filesToDownload) {
+                if (file.isDataUrl) {
+                    // Convert data URL to binary for ZIP
+                    const base64Data = file.content.split(',')[1];
+                    zip.file(file.filename, base64Data, {base64: true});
+                } else {
+                    zip.file(file.filename, file.content);
+                }
+            }
 
             const blob = await zip.generateAsync({type: 'blob', compression: 'DEFLATE'});
             const reader = new FileReader();
@@ -331,7 +406,18 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
             // Download individual files
             for (const file of filesToDownload) {
                 console.log('[Extract] Downloading:', file.filename);
-                await downloadFile(file.content, file.filename);
+
+                if (file.isDataUrl) {
+                    // For data URLs (screenshots), download directly
+                    await chrome.downloads.download({
+                        url: file.content,
+                        filename: file.filename,
+                        saveAs: false
+                    });
+                } else {
+                    // For text content, use existing downloadFile function
+                    await downloadFile(file.content, file.filename);
+                }
             }
 
             showNotification('Extraction Complete', `Downloaded ${filesToDownload.length} file(s)`);

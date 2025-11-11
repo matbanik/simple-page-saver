@@ -63,6 +63,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log('[Prompt] Custom prompt saved');
     });
 
+    // Screenshot checkbox - enable/disable preserve color option
+    document.getElementById('include-screenshot').addEventListener('change', (e) => {
+        const preserveColorCheckbox = document.getElementById('preserve-color');
+        preserveColorCheckbox.disabled = !e.target.checked;
+        if (!e.target.checked) {
+            preserveColorCheckbox.checked = false;
+        }
+    });
+
     // Load AI enabled setting
     await loadAISettings();
 
@@ -146,10 +155,12 @@ async function extractCurrentPage() {
         const downloadContent = document.getElementById('download-content').checked;
         const downloadMediaLinks = document.getElementById('download-media-links').checked;
         const downloadExternalLinks = document.getElementById('download-external-links').checked;
+        const includeScreenshot = document.getElementById('include-screenshot').checked;
+        const preserveColor = document.getElementById('preserve-color').checked;
         const useZip = document.getElementById('single-page-zip').checked;
 
         // Validate at least one option selected
-        if (!downloadContent && !downloadMediaLinks && !downloadExternalLinks) {
+        if (!downloadContent && !downloadMediaLinks && !downloadExternalLinks && !includeScreenshot) {
             showStatus('Please select at least one download option', 'error');
             disableButtons(false);
             return;
@@ -163,7 +174,9 @@ async function extractCurrentPage() {
             downloadOptions: {
                 content: downloadContent,
                 mediaLinks: downloadMediaLinks,
-                externalLinks: downloadExternalLinks
+                externalLinks: downloadExternalLinks,
+                screenshot: includeScreenshot,
+                preserveColor: preserveColor
             }
         });
 
