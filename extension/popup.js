@@ -730,11 +730,15 @@ function createJobElement(job) {
     // Show remove button for completed/failed jobs
     const showRemoveButton = job.status === 'completed' || job.status === 'failed';
 
+    // Show load button for completed site_map jobs
+    const showLoadButton = job.status === 'completed' && job.type === 'site_map';
+
     div.innerHTML = `
         <div class="job-header">
             <div class="job-title" title="${title}">${truncate(title, 35)}</div>
-            <div style="display: flex; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 5px;">
                 <div class="job-status ${job.status}">${statusText}</div>
+                ${showLoadButton ? '<button class="job-load" title="Load discovered URLs">Load</button>' : ''}
                 ${showRemoveButton ? '<button class="job-remove" title="Remove from list">×</button>' : ''}
             </div>
         </div>
@@ -747,12 +751,23 @@ function createJobElement(job) {
         <div class="job-time">${getTimeAgo(job.created_at)}</div>
     `;
 
-    // Add click handler for job details (not on remove button)
+    // Add click handler for job details (not on action buttons)
     div.addEventListener('click', (e) => {
-        if (!e.target.classList.contains('job-remove')) {
+        if (!e.target.classList.contains('job-remove') && !e.target.classList.contains('job-load')) {
             handleJobClick(job);
         }
     });
+
+    // Add click handler for load button
+    if (showLoadButton) {
+        const loadBtn = div.querySelector('.job-load');
+        if (loadBtn) {
+            loadBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                loadJobContext(job);
+            });
+        }
+    }
 
     // Add click handler for remove button
     if (showRemoveButton) {
@@ -774,16 +789,80 @@ async function handleJobClick(job) {
 
     // For completed jobs, show result details
     if (job.status === 'completed' && job.result) {
-        showStatus(`Job completed: ${job.result.filename} (${job.result.word_count} words)`, 'success');
+        if (job.type === 'site_map') {
+            showStatus(`Site mapping completed: ${job.result.total_discovered} URLs discovered`, 'success');
+        } else if (job.result.filename) {
+            showStatus(`Job completed: ${job.result.filename} (${job.result.word_count} words)`, 'success');
+        }
     } else if (job.status === 'failed') {
         showStatus(`Job failed: ${job.error}`, 'error');
     } else if (job.status === 'processing') {
         const progress = job.progress || {};
         showStatus(`Job in progress: ${progress.message || 'Processing...'}`, 'info');
     }
+}
 
-    // TODO: Restore job context (for multi-page jobs)
-    // This could restore the URL list for site mapping, etc.
+// Load job context (restore job data to UI)
+async function loadJobContext(job) {
+    console.log('[Jobs] Loading job context:', job.id);
+
+    try {
+        if (job.type === 'site_map' && job.status === 'completed' && job.result) {
+            // Load discovered URLs into the site mapping section
+            const discoveredUrls = job.result.discovered_urls || [];
+
+            // Switch to Advanced Options tab
+            const advancedTab = document.getElementById('tab-advanced');
+            const advancedSection = document.getElementById('advanced-section');
+
+            if (advancedTab && advancedSection) {
+                // Remove active class from all tabs
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
+
+                // Activate advanced tab
+                advancedTab.classList.add('active');
+                advancedSection.style.display = 'block';
+            }
+
+            // Populate the discovered URLs list
+            const urlsList = document.getElementById('discovered-urls-list');
+            if (urlsList && discoveredUrls.length > 0) {
+                urlsList.innerHTML = '';
+
+                discoveredUrls.forEach(url => {
+                    const label = document.createElement('label');
+                    label.className = 'url-item';
+                    label.innerHTML = `
+                        <input type="checkbox" value="${url}" checked>
+                        <span>${url}</span>
+                    `;
+                    urlsList.appendChild(label);
+                });
+
+                // Show the discovered URLs section
+                document.getElementById('discovered-urls').style.display = 'block';
+
+                // Update URL input with start URL if available
+                const startUrl = job.params.start_url;
+                if (startUrl) {
+                    const urlInput = document.getElementById('map-url');
+                    if (urlInput) {
+                        urlInput.value = startUrl;
+                    }
+                }
+
+                showStatus(`Loaded ${discoveredUrls.length} URLs from site mapping job`, 'success');
+            } else {
+                showStatus('No URLs found in job result', 'warning');
+            }
+        } else {
+            showStatus('Cannot load context for this job type', 'warning');
+        }
+    } catch (error) {
+        console.error('[Jobs] Error loading job context:', error);
+        showStatus('Failed to load job context', 'error');
+    }
 }
 
 // Helper: Check if timestamp is recent (within last hour)
@@ -794,42 +873,67 @@ function isRecent(timestamp) {
     return (now - time) < 3600000; // 1 hour in milliseconds
 }
 
-// Remove a single job from the UI (client-side only, doesn't delete from backend)
+// Remove a single job from the backend
 async function removeJob(jobId) {
-    console.log('[Jobs] Removing job from UI:', jobId);
+    console.log('[Jobs] Removing job from backend:', jobId);
 
-    // Get current jobs from storage
-    const storage = await chrome.storage.local.get(['activeJobs']);
-    const activeJobs = storage.activeJobs || [];
+    try {
+        // Get API URL
+        const storage = await chrome.storage.local.get(['apiUrl']);
+        const apiUrl = storage.apiUrl || 'http://localhost:8077';
 
-    // Filter out the job
-    const updatedJobs = activeJobs.filter(job => job.id !== jobId);
+        // Delete from backend
+        const response = await fetch(`${apiUrl}/jobs/${jobId}`, {
+            method: 'DELETE'
+        });
 
-    // Update storage and UI
-    await chrome.storage.local.set({ activeJobs: updatedJobs });
-    displayJobs(updatedJobs);
+        if (!response.ok) {
+            throw new Error(`Failed to delete job: ${response.status}`);
+        }
 
-    showStatus('Job removed from list', 'info');
+        // Refresh jobs list from backend
+        await loadActiveJobs();
+
+        showStatus('Job removed', 'info');
+    } catch (error) {
+        console.error('[Jobs] Error removing job:', error);
+        showStatus('Failed to remove job', 'error');
+    }
 }
 
 // Clear all completed/failed jobs
 async function clearCompletedJobs() {
     console.log('[Jobs] Clearing completed jobs');
 
-    // Get current jobs from storage
-    const storage = await chrome.storage.local.get(['activeJobs']);
-    const activeJobs = storage.activeJobs || [];
+    try {
+        // Get API URL and current jobs
+        const storage = await chrome.storage.local.get(['apiUrl']);
+        const apiUrl = storage.apiUrl || 'http://localhost:8077';
 
-    // Filter to keep only processing/pending jobs
-    const activeOnlyJobs = activeJobs.filter(job =>
-        job.status === 'processing' || job.status === 'pending'
-    );
+        // Get all jobs from backend
+        const response = await fetch(`${apiUrl}/jobs?limit=100`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch jobs: ${response.status}`);
+        }
 
-    // Update storage and UI
-    await chrome.storage.local.set({ activeJobs: activeOnlyJobs });
-    displayJobs(activeOnlyJobs);
+        const data = await response.json();
+        const allJobs = data.jobs || [];
 
-    showStatus('Completed jobs cleared', 'info');
+        // Delete completed/failed jobs from backend
+        const deletePromises = allJobs
+            .filter(job => job.status === 'completed' || job.status === 'failed')
+            .map(job => fetch(`${apiUrl}/jobs/${job.id}`, { method: 'DELETE' }));
+
+        await Promise.all(deletePromises);
+
+        // Refresh jobs list from backend
+        await loadActiveJobs();
+
+        showStatus('Completed jobs cleared', 'info');
+    } catch (error) {
+        console.error('[Jobs] Error clearing completed jobs:', error);
+        showStatus('Failed to clear completed jobs', 'error');
+    }
 }
 
 // Helper: Get time ago string
