@@ -461,6 +461,26 @@
             </div>
         </div>
 
+        <div style="margin-top: 12px;">
+            <label style="font-size: 12px; font-weight: 500; display: block; margin-bottom: 4px;">
+                Chunking Settings:
+                <span style="font-size: 10px; color: #999; font-weight: normal;">(for large documents)</span>
+            </label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 4px;">
+                <div>
+                    <label style="font-size: 11px; display: block; margin-bottom: 2px; color: #666;">Worker Count:</label>
+                    <input type="number" id="worker-count" min="1" max="16" value="4" style="width: 100%; padding: 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px;">
+                </div>
+                <div>
+                    <label style="font-size: 11px; display: block; margin-bottom: 2px; color: #666;">Overlap (%):</label>
+                    <input type="number" id="overlap-percentage" min="0" max="50" value="10" style="width: 100%; padding: 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px;">
+                </div>
+            </div>
+            <div style="font-size: 10px; color: #666; padding: 4px; background: #f9f9f9; border-radius: 3px;">
+                Workers: Parallel processing threads (higher = faster). Overlap: Context preservation between chunks.
+            </div>
+        </div>
+
         <div id="ai-prompt-section" style="display: none; margin-top: 12px;">
             <label style="font-size: 12px; font-weight: 500; display: block; margin-bottom: 4px;">Custom AI Instructions:</label>
             <select id="prompt-presets" style="width: 100%; padding: 6px; margin-bottom: 6px; font-size: 12px;">
