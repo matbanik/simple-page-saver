@@ -28,7 +28,11 @@ const connectionState = {
     lastSuccessfulPing: null,
     consecutiveFailures: 0,
     aiEnabled: false,
-    monitoring: false
+    monitoring: false,
+    isBusy: false,               // New: track if backend is busy
+    lastRequestTime: null,       // New: track last request
+    averageResponseTime: 0,      // New: track average response time
+    slowResponseCount: 0         // New: count slow responses
 };
 
 // Site mapping state (for pause/resume)
@@ -67,10 +71,13 @@ async function checkBackendHealthQuiet() {
         const storage = await chrome.storage.local.get(['apiEndpoint']);
         const apiUrl = storage.apiEndpoint || API_BASE_URL;
 
+        const startTime = Date.now();
         const response = await fetch(`${apiUrl}/`, {
             method: 'GET',
-            signal: AbortSignal.timeout(5000)
+            signal: AbortSignal.timeout(10000) // Increased to 10 seconds for busy backend
         });
+
+        const responseTime = Date.now() - startTime;
 
         if (response.ok) {
             const data = await response.json();
@@ -80,6 +87,27 @@ async function checkBackendHealthQuiet() {
             connectionState.lastSuccessfulPing = Date.now();
             connectionState.consecutiveFailures = 0;
             connectionState.aiEnabled = data.ai_enabled;
+
+            // Update response time tracking
+            if (connectionState.averageResponseTime === 0) {
+                connectionState.averageResponseTime = responseTime;
+            } else {
+                connectionState.averageResponseTime =
+                    (connectionState.averageResponseTime * 0.7) + (responseTime * 0.3);
+            }
+
+            // Check if backend is busy (response time > 3 seconds or > 3x average)
+            const isSlow = responseTime > 3000 ||
+                          responseTime > (connectionState.averageResponseTime * 3);
+
+            if (isSlow) {
+                connectionState.slowResponseCount++;
+                connectionState.isBusy = connectionState.slowResponseCount >= 2;
+                console.log(`[Connection] Slow response: ${responseTime}ms (avg: ${Math.round(connectionState.averageResponseTime)}ms)`);
+            } else {
+                connectionState.slowResponseCount = Math.max(0, connectionState.slowResponseCount - 1);
+                connectionState.isBusy = false;
+            }
 
             if (wasDisconnected) {
                 console.log('[Connection] ✓ Backend reconnected');
@@ -99,15 +127,20 @@ async function checkBackendHealthQuiet() {
 // Handle connection failure
 function handleConnectionFailure() {
     connectionState.consecutiveFailures++;
+    connectionState.isBusy = false;
+    connectionState.slowResponseCount = 0;
 
-    if (connectionState.isConnected) {
-        console.warn('[Connection] Backend connection lost');
-        connectionState.isConnected = false;
+    // Only mark as disconnected after 3 consecutive failures (90 seconds total)
+    if (connectionState.consecutiveFailures >= 3) {
+        if (connectionState.isConnected) {
+            console.warn('[Connection] Backend connection lost (after 3 attempts)');
+            connectionState.isConnected = false;
+        }
+    } else {
+        console.warn(`[Connection] Health check failed (attempt ${connectionState.consecutiveFailures}/3)`);
     }
 
-    if (connectionState.consecutiveFailures === 1) {
-        console.warn('[Connection] First connection failure detected');
-    } else if (connectionState.consecutiveFailures % 5 === 0) {
+    if (connectionState.consecutiveFailures % 5 === 0) {
         console.error(`[Connection] ${connectionState.consecutiveFailures} consecutive failures`);
     }
 }
@@ -166,7 +199,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 isConnected: connectionState.isConnected,
                 lastSuccessfulPing: connectionState.lastSuccessfulPing,
                 consecutiveFailures: connectionState.consecutiveFailures,
-                aiEnabled: connectionState.aiEnabled
+                aiEnabled: connectionState.aiEnabled,
+                isBusy: connectionState.isBusy,
+                averageResponseTime: Math.round(connectionState.averageResponseTime)
             }
         });
         return false;
@@ -306,17 +341,46 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
         // Trigger print dialog if PDF printing is requested
         if (downloadOptions.printToPdf) {
             try {
-                console.log('[Extract] Opening print dialog...');
+                console.log('[Extract] Opening print dialog with custom settings...');
                 await chrome.scripting.executeScript({
                     target: { tabId: tab.id },
                     func: () => {
+                        // Inject print styles
+                        const style = document.createElement('style');
+                        style.id = 'simple-page-saver-print-styles';
+                        style.textContent = `
+                            @page {
+                                size: A0;
+                                margin: 0.5cm;
+                            }
+                            @media print {
+                                body {
+                                    -webkit-print-color-adjust: exact !important;
+                                    print-color-adjust: exact !important;
+                                }
+                                /* Disable background graphics by default */
+                                * {
+                                    background: transparent !important;
+                                    background-image: none !important;
+                                }
+                            }
+                        `;
+                        document.head.appendChild(style);
+
+                        // Open print dialog
                         window.print();
+
+                        // Clean up after print dialog closes
+                        setTimeout(() => {
+                            const styleEl = document.getElementById('simple-page-saver-print-styles');
+                            if (styleEl) styleEl.remove();
+                        }, 1000);
                     }
                 });
-                console.log('[Extract] Print dialog opened');
+                console.log('[Extract] Print dialog opened with A0 size, backgrounds disabled');
 
                 // Add informational note
-                warnings.addGeneric('print', 'Print dialog opened. Select "Save as PDF" as the destination to save the entire page as PDF.');
+                warnings.addGeneric('print', 'Print dialog opened with A0 paper size and backgrounds disabled. Select "Save as PDF" to save. Note: "2 pages per sheet" must be manually configured in print settings.');
             } catch (error) {
                 console.error('[Extract] Failed to open print dialog:', error);
                 warnings.addGeneric('print', `Failed to open print dialog: ${error.message}`);

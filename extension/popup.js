@@ -1059,32 +1059,47 @@ async function updateConnectionStatus() {
             const statusDot = statusDiv.querySelector('.status-dot');
 
             if (state.isConnected) {
-                statusDiv.className = 'connected';
-                statusDot.className = 'status-dot green';
+                // Backend is connected
+                if (state.isBusy) {
+                    // Backend is busy/slow
+                    statusDiv.className = 'checking';
+                    statusDot.className = 'status-dot orange';
 
-                let text = '✓ Backend connected';
-                if (state.aiEnabled) {
-                    text += ' (AI enabled)';
-                } else {
-                    text += ' (Fallback mode)';
-                }
-
-                // Show time since last ping
-                if (state.lastSuccessfulPing) {
-                    const secondsAgo = Math.floor((Date.now() - state.lastSuccessfulPing) / 1000);
-                    if (secondsAgo < 60) {
-                        text += ` • ${secondsAgo}s ago`;
+                    let text = '⏳ Backend busy';
+                    if (state.averageResponseTime > 0) {
+                        text += ` (${state.averageResponseTime}ms avg)`;
                     }
-                }
+                    statusText.textContent = text;
+                } else {
+                    // Backend is healthy
+                    statusDiv.className = 'connected';
+                    statusDot.className = 'status-dot green';
 
-                statusText.textContent = text;
+                    let text = '✓ Backend connected';
+                    if (state.aiEnabled) {
+                        text += ' (AI enabled)';
+                    } else {
+                        text += ' (Fallback mode)';
+                    }
+
+                    // Show time since last ping
+                    if (state.lastSuccessfulPing) {
+                        const secondsAgo = Math.floor((Date.now() - state.lastSuccessfulPing) / 1000);
+                        if (secondsAgo < 60) {
+                            text += ` • ${secondsAgo}s ago`;
+                        }
+                    }
+
+                    statusText.textContent = text;
+                }
             } else {
+                // Backend is offline
                 statusDiv.className = 'disconnected';
                 statusDot.className = 'status-dot red';
 
-                let text = '✗ Backend disconnected';
+                let text = '✗ Backend offline';
                 if (state.consecutiveFailures > 0) {
-                    text += ` (${state.consecutiveFailures} failures)`;
+                    text += ` (${state.consecutiveFailures} attempts)`;
                 }
 
                 statusText.textContent = text;
