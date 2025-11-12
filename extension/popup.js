@@ -38,6 +38,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('filter-external').addEventListener('change', filterUrls);
     document.getElementById('filter-media').addEventListener('change', filterUrls);
 
+    // Tree control buttons
+    document.getElementById('expand-all').addEventListener('click', expandAllNodes);
+    document.getElementById('collapse-all').addEventListener('click', collapseAllNodes);
+    document.getElementById('select-all').addEventListener('click', selectAllNodes);
+    document.getElementById('deselect-all').addEventListener('click', deselectAllNodes);
+
     // Listen for progress updates
     chrome.runtime.onMessage.addListener((message) => {
         if (message.type === 'PROGRESS_UPDATE') {
@@ -221,6 +227,7 @@ async function mapSite() {
             document.getElementById('extraction-controls').style.display = 'block';
             document.getElementById('search-box').style.display = 'block';
             document.getElementById('link-filters').style.display = 'flex';
+            document.getElementById('tree-controls').style.display = 'flex';
         } else {
             showStatus(`Error: ${response.error}`, 'error');
         }
@@ -231,7 +238,174 @@ async function mapSite() {
     }
 }
 
-// Display URLs in the list
+// Build tree structure from flat URL list
+function buildTree(urls) {
+    // Create a map of URL to its data
+    const urlMap = new Map();
+    urls.forEach(urlData => {
+        urlMap.set(urlData.url, { ...urlData, children: [] });
+    });
+
+    // Build parent-child relationships
+    const roots = [];
+    urlMap.forEach((urlData, url) => {
+        if (urlData.parent && urlMap.has(urlData.parent)) {
+            // Add to parent's children
+            urlMap.get(urlData.parent).children.push(urlData);
+        } else {
+            // No parent or parent not in list - treat as root
+            roots.push(urlData);
+        }
+    });
+
+    return roots;
+}
+
+// Create a tree node element
+function createTreeNode(urlData, index) {
+    const node = document.createElement('div');
+    node.className = 'tree-node';
+    node.dataset.url = urlData.url;
+    node.dataset.type = urlData.type;
+
+    const hasChildren = urlData.children && urlData.children.length > 0;
+
+    // Node content
+    const content = document.createElement('div');
+    content.className = 'tree-node-content';
+
+    // Expand/collapse icon
+    const expandIcon = document.createElement('span');
+    expandIcon.className = 'tree-expand-icon' + (hasChildren ? '' : ' empty');
+    expandIcon.textContent = hasChildren ? '▶' : '';
+    expandIcon.onclick = (e) => {
+        e.stopPropagation();
+        toggleTreeNode(node);
+    };
+
+    // Checkbox
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'tree-node-checkbox';
+    checkbox.id = `url-${index}`;
+    checkbox.checked = urlData.type === 'internal'; // Auto-select internal links
+    checkbox.dataset.url = urlData.url;
+    checkbox.onclick = (e) => {
+        e.stopPropagation();
+        handleCheckboxChange(node, checkbox.checked);
+    };
+
+    // Label
+    const label = document.createElement('span');
+    label.className = 'tree-node-label';
+    label.textContent = urlData.url;
+    label.title = urlData.url;
+
+    // Type badge
+    const badge = document.createElement('span');
+    badge.className = 'tree-node-badge';
+    if (urlData.type === 'internal') {
+        badge.classList.add('badge-internal');
+        badge.textContent = 'INT';
+    } else if (urlData.type === 'external') {
+        badge.classList.add('badge-external');
+        badge.textContent = 'EXT';
+    } else {
+        badge.classList.add('badge-media');
+        badge.textContent = 'MEDIA';
+    }
+
+    content.appendChild(expandIcon);
+    content.appendChild(checkbox);
+    content.appendChild(label);
+    content.appendChild(badge);
+    node.appendChild(content);
+
+    // Children container
+    if (hasChildren) {
+        const childrenContainer = document.createElement('div');
+        childrenContainer.className = 'tree-children';
+
+        urlData.children.forEach((child, childIndex) => {
+            const childNode = createTreeNode(child, `${index}-${childIndex}`);
+            childrenContainer.appendChild(childNode);
+        });
+
+        node.appendChild(childrenContainer);
+    }
+
+    return node;
+}
+
+// Toggle tree node expansion
+function toggleTreeNode(node) {
+    const expandIcon = node.querySelector('.tree-expand-icon');
+    const children = node.querySelector('.tree-children');
+
+    if (!children || expandIcon.classList.contains('empty')) return;
+
+    if (children.classList.contains('expanded')) {
+        children.classList.remove('expanded');
+        expandIcon.textContent = '▶';
+    } else {
+        children.classList.add('expanded');
+        expandIcon.textContent = '▼';
+    }
+}
+
+// Handle checkbox change with hierarchical selection
+function handleCheckboxChange(node, isChecked) {
+    // Update all child checkboxes
+    const childCheckboxes = node.querySelectorAll('.tree-children .tree-node-checkbox');
+    childCheckboxes.forEach(cb => {
+        cb.checked = isChecked;
+    });
+
+    // Update parent checkbox state (indeterminate if some children are checked)
+    updateParentCheckboxState(node);
+}
+
+// Update parent checkbox state based on children
+function updateParentCheckboxState(node) {
+    // Find parent node
+    let parent = node.parentElement;
+    while (parent && !parent.classList.contains('tree-node')) {
+        parent = parent.parentElement;
+    }
+
+    if (!parent) return;
+
+    const parentCheckbox = parent.querySelector(':scope > .tree-node-content > .tree-node-checkbox');
+    if (!parentCheckbox) return;
+
+    // Get all direct children checkboxes
+    const childrenContainer = parent.querySelector(':scope > .tree-children');
+    if (!childrenContainer) return;
+
+    const childCheckboxes = Array.from(
+        childrenContainer.querySelectorAll(':scope > .tree-node > .tree-node-content > .tree-node-checkbox')
+    );
+
+    if (childCheckboxes.length === 0) return;
+
+    const checkedCount = childCheckboxes.filter(cb => cb.checked).length;
+
+    if (checkedCount === 0) {
+        parentCheckbox.checked = false;
+        parentCheckbox.indeterminate = false;
+    } else if (checkedCount === childCheckboxes.length) {
+        parentCheckbox.checked = true;
+        parentCheckbox.indeterminate = false;
+    } else {
+        parentCheckbox.checked = false;
+        parentCheckbox.indeterminate = true;
+    }
+
+    // Recursively update parent's parent
+    updateParentCheckboxState(parent);
+}
+
+// Display URLs in tree view
 function displayUrls(urls) {
     const urlList = document.getElementById('url-list');
     urlList.innerHTML = '';
@@ -241,42 +415,56 @@ function displayUrls(urls) {
         return;
     }
 
-    urls.forEach((urlData, index) => {
-        const item = document.createElement('div');
-        item.className = 'url-item';
-        item.dataset.type = urlData.type;
-        item.dataset.url = urlData.url;
+    // Build tree structure
+    const tree = buildTree(urls);
 
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.id = `url-${index}`;
-        checkbox.checked = urlData.type === 'internal'; // Auto-select internal links
-        checkbox.dataset.url = urlData.url;
+    // Create tree nodes
+    tree.forEach((rootData, index) => {
+        const treeNode = createTreeNode(rootData, index);
+        urlList.appendChild(treeNode);
+    });
 
-        const label = document.createElement('span');
-        label.textContent = urlData.url;
-        label.title = urlData.url;
+    // Show tree controls
+    document.getElementById('tree-controls').style.display = 'flex';
+}
 
-        const typeTag = document.createElement('span');
-        typeTag.style.cssText = 'font-size: 10px; padding: 2px 6px; border-radius: 3px; margin-left: 6px;';
-        if (urlData.type === 'internal') {
-            typeTag.style.background = '#e3f2fd';
-            typeTag.style.color = '#1976d2';
-            typeTag.textContent = 'INT';
-        } else if (urlData.type === 'external') {
-            typeTag.style.background = '#fff3e0';
-            typeTag.style.color = '#e65100';
-            typeTag.textContent = 'EXT';
-        } else {
-            typeTag.style.background = '#f3e5f5';
-            typeTag.style.color = '#7b1fa2';
-            typeTag.textContent = 'MEDIA';
+// Expand all tree nodes
+function expandAllNodes() {
+    document.querySelectorAll('.tree-children').forEach(children => {
+        children.classList.add('expanded');
+        const node = children.parentElement;
+        const expandIcon = node.querySelector('.tree-expand-icon');
+        if (expandIcon && !expandIcon.classList.contains('empty')) {
+            expandIcon.textContent = '▼';
         }
+    });
+}
 
-        item.appendChild(checkbox);
-        item.appendChild(label);
-        item.appendChild(typeTag);
-        urlList.appendChild(item);
+// Collapse all tree nodes
+function collapseAllNodes() {
+    document.querySelectorAll('.tree-children').forEach(children => {
+        children.classList.remove('expanded');
+        const node = children.parentElement;
+        const expandIcon = node.querySelector('.tree-expand-icon');
+        if (expandIcon && !expandIcon.classList.contains('empty')) {
+            expandIcon.textContent = '▶';
+        }
+    });
+}
+
+// Select all checkboxes
+function selectAllNodes() {
+    document.querySelectorAll('.tree-node-checkbox').forEach(cb => {
+        cb.checked = true;
+        cb.indeterminate = false;
+    });
+}
+
+// Deselect all checkboxes
+function deselectAllNodes() {
+    document.querySelectorAll('.tree-node-checkbox').forEach(cb => {
+        cb.checked = false;
+        cb.indeterminate = false;
     });
 }
 
@@ -287,11 +475,11 @@ function filterUrls() {
     const showExternal = document.getElementById('filter-external').checked;
     const showMedia = document.getElementById('filter-media').checked;
 
-    const items = document.querySelectorAll('.url-item');
+    const treeNodes = document.querySelectorAll('.tree-node');
 
-    items.forEach(item => {
-        const url = item.dataset.url.toLowerCase();
-        const type = item.dataset.type;
+    treeNodes.forEach(node => {
+        const url = node.dataset.url.toLowerCase();
+        const type = node.dataset.type;
 
         const matchesSearch = url.includes(searchTerm);
         const matchesType =
@@ -299,14 +487,14 @@ function filterUrls() {
             (type === 'external' && showExternal) ||
             (type === 'media' && showMedia);
 
-        item.style.display = (matchesSearch && matchesType) ? 'flex' : 'none';
+        node.style.display = (matchesSearch && matchesType) ? 'block' : 'none';
     });
 }
 
 // Extract selected pages
 async function extractSelectedPages() {
     try {
-        const checkboxes = document.querySelectorAll('.url-item input[type="checkbox"]:checked');
+        const checkboxes = document.querySelectorAll('.tree-node-checkbox:checked');
         const selectedUrls = Array.from(checkboxes).map(cb => cb.dataset.url);
 
         if (selectedUrls.length === 0) {
