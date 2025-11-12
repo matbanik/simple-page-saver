@@ -39,6 +39,7 @@ const connectionState = {
 const siteMappingState = {
     currentJobId: null,
     isPaused: false,
+    isCompleting: false,  // New: flag to complete gracefully after current URL
     discoveredUrls: new Set(),
     processedUrls: new Set(),
     urlsToProcess: [],
@@ -250,6 +251,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     } else if (request.action === 'STOP_JOB') {
         handleStopJob(request.jobId)
+            .then(response => sendResponse(response))
+            .catch(error => sendResponse({ success: false, error: error.message }));
+        return true;
+    } else if (request.action === 'COMPLETE_NOW_JOB') {
+        handleCompleteNowJob(request.jobId)
             .then(response => sendResponse(response))
             .catch(error => sendResponse({ success: false, error: error.message }));
         return true;
@@ -671,17 +677,21 @@ async function handleMapSite(startUrl, depth) {
         siteMappingState.urlsToProcess = urlsToProcess;
         siteMappingState.urlDataList = urlDataList;
 
-        while (urlsToProcess.length > 0 && !siteMappingState.isPaused) {
+        while (urlsToProcess.length > 0 && !siteMappingState.isPaused && !siteMappingState.isCompleting) {
             const { url, level, parent } = urlsToProcess.shift();
 
             if (processedUrls.has(url) || level > depth) {
                 continue;
             }
 
-            // Check for pause again after async operations (Bug fix #1)
+            // Check for pause/complete again after async operations
             if (siteMappingState.isPaused) {
                 console.log('[Map] Job paused by user');
                 break;
+            }
+
+            if (siteMappingState.isCompleting) {
+                console.log('[Map] Completing job now - will finish after this URL');
             }
 
             processedUrls.add(url);
@@ -777,6 +787,13 @@ async function handleMapSite(startUrl, depth) {
         // Add the start URL to the list if not already there
         if (!urlDataList.some(u => u.url === startUrl)) {
             urlDataList.unshift({ url: startUrl, type: 'internal', level: 0, parent: null });
+        }
+
+        // Handle completing state (Complete Now was clicked)
+        if (siteMappingState.isCompleting) {
+            console.log('[Map] Completing job early at user request...');
+            siteMappingState.isCompleting = false; // Reset flag
+            // Continue to complete the job below (don't return early)
         }
 
         // Handle paused state (Bug fix #3)
@@ -1223,6 +1240,48 @@ async function handleStopJob(jobId) {
 
     } catch (error) {
         console.error('[Job] Failed to stop job:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// Complete a job now (gracefully finish current URL and complete)
+async function handleCompleteNowJob(jobId) {
+    try {
+        console.log('[Job] Completing job now:', jobId);
+
+        // Set the completing flag to finish after current URL
+        if (siteMappingState.currentJobId === jobId) {
+            siteMappingState.isCompleting = true;
+            console.log('[Job] Set isCompleting flag - will complete after current URL');
+            showNotification('Completing Job', 'Will finish after current URL...');
+        } else {
+            // Job might be on backend only, not actively mapping
+            console.warn('[Job] Job is not actively running in background worker');
+
+            // Mark as completed on backend
+            const storage = await chrome.storage.local.get(['apiEndpoint']);
+            const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+
+            try {
+                const response = await fetch(`${apiUrl}/jobs/${jobId}/complete`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showNotification('Job Completed', 'Job marked as complete');
+                    return { success: true, message: 'Job completed', job: result.job };
+                }
+            } catch (backendError) {
+                console.warn('[Job] Could not complete on backend:', backendError.message);
+            }
+        }
+
+        // The actual completion will happen in the mapping loop when it checks isCompleting
+        return { success: true, message: 'Job will complete after current URL' };
+
+    } catch (error) {
+        console.error('[Job] Failed to complete job:', error);
         return { success: false, error: error.message };
     }
 }
