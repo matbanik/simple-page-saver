@@ -1058,6 +1058,10 @@ async function updateConnectionStatus() {
             const statusText = document.getElementById('connection-text');
             const statusDot = statusDiv.querySelector('.status-dot');
 
+            // Get EXTENSION's AI setting (not backend's capability)
+            const aiStorage = await chrome.storage.local.get(['enableAI']);
+            const extensionAIEnabled = aiStorage.enableAI ?? false;
+
             if (state.isConnected) {
                 // Backend is connected
                 if (state.isBusy) {
@@ -1076,8 +1080,13 @@ async function updateConnectionStatus() {
                     statusDot.className = 'status-dot green';
 
                     let text = '✓ Backend connected';
-                    if (state.aiEnabled) {
+                    // Show EXTENSION's AI setting, not backend's capability
+                    if (extensionAIEnabled) {
                         text += ' (AI enabled)';
+                        // Warn if extension wants AI but backend can't provide it
+                        if (!state.aiEnabled) {
+                            text += ' ⚠️ No API key';
+                        }
                     } else {
                         text += ' (Fallback mode)';
                     }

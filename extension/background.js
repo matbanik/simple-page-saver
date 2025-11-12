@@ -957,10 +957,18 @@ async function handleResumeJob(jobId) {
 
         console.log('[Job] Job resumed successfully');
 
-        // Continue site mapping from saved state (Bug fix #2)
-        if (job.type === 'site_map' && job.params.saved_state) {
+        // Continue site mapping from saved state (Bug fix: check both params and result)
+        const savedState = (job.params && job.params.saved_state) || (job.result && job.result.saved_state);
+
+        if (job.type === 'site_map' && savedState) {
             console.log('[Job] Continuing site mapping from saved state...');
-            await continueSiteMapping(jobId, job.params.saved_state);
+            console.log('[Job] URLs to process:', savedState.urlsToProcess?.length || 0);
+            await continueSiteMapping(jobId, savedState);
+        } else {
+            console.warn('[Job] No saved_state found for job resume');
+            console.warn('[Job] Job type:', job.type);
+            console.warn('[Job] Has params.saved_state:', !!(job.params && job.params.saved_state));
+            console.warn('[Job] Has result.saved_state:', !!(job.result && job.result.saved_state));
         }
 
         return { success: true, message: 'Job resumed', job: result.job };
