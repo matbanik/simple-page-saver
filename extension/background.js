@@ -338,14 +338,20 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
         console.log('[Extract] Waiting for dynamic content...');
         await sleep(DELAY_AFTER_LOAD);
 
-        // Trigger print dialog if PDF printing is requested
+        // Extract HTML from the page first (needed for title)
+        console.log('[Extract] Extracting HTML...');
+        const pageData = await extractPageData(tab.id);
+        console.log('[Extract] HTML extracted, size:', pageData.html.length, 'chars');
+
+        // Generate PDF directly if requested (using Chrome DevTools Protocol)
         if (downloadOptions.printToPdf) {
             try {
-                console.log('[Extract] Opening print dialog with custom settings...');
+                console.log('[Extract] Generating PDF using Chrome DevTools Protocol...');
+
+                // Inject print styles before PDF generation
                 await chrome.scripting.executeScript({
                     target: { tabId: tab.id },
                     func: () => {
-                        // Inject print styles
                         const style = document.createElement('style');
                         style.id = 'simple-page-saver-print-styles';
                         style.textContent = `
@@ -358,7 +364,7 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
                                     -webkit-print-color-adjust: exact !important;
                                     print-color-adjust: exact !important;
                                 }
-                                /* Disable background graphics by default */
+                                /* Disable background graphics */
                                 * {
                                     background: transparent !important;
                                     background-image: none !important;
@@ -366,31 +372,46 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
                             }
                         `;
                         document.head.appendChild(style);
-
-                        // Open print dialog
-                        window.print();
-
-                        // Clean up after print dialog closes
-                        setTimeout(() => {
-                            const styleEl = document.getElementById('simple-page-saver-print-styles');
-                            if (styleEl) styleEl.remove();
-                        }, 1000);
                     }
                 });
-                console.log('[Extract] Print dialog opened with A0 size, backgrounds disabled');
 
-                // Add informational note
-                warnings.addGeneric('print', 'Print dialog opened with A0 paper size and backgrounds disabled. Select "Save as PDF" to save. Note: "2 pages per sheet" must be manually configured in print settings.');
+                // Generate PDF using Chrome DevTools Protocol
+                const pdfData = await generatePdfUsingCDP(tab.id, pageData.title);
+
+                if (pdfData) {
+                    console.log('[Extract] PDF generated successfully, size:', pdfData.byteLength, 'bytes');
+
+                    // Download the PDF
+                    const blob = new Blob([pdfData], { type: 'application/pdf' });
+                    const pdfUrl = URL.createObjectURL(blob);
+                    const filename = sanitizeFilename(pageData.title || 'page') + '.pdf';
+
+                    await chrome.downloads.download({
+                        url: pdfUrl,
+                        filename: filename,
+                        saveAs: false
+                    });
+
+                    console.log('[Extract] PDF downloaded:', filename);
+                    warnings.addGeneric('print', `PDF saved as ${filename} (A0 size, no backgrounds)`);
+                } else {
+                    throw new Error('PDF generation returned no data');
+                }
+
+                // Clean up styles
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    func: () => {
+                        const styleEl = document.getElementById('simple-page-saver-print-styles');
+                        if (styleEl) styleEl.remove();
+                    }
+                });
+
             } catch (error) {
-                console.error('[Extract] Failed to open print dialog:', error);
-                warnings.addGeneric('print', `Failed to open print dialog: ${error.message}`);
+                console.error('[Extract] Failed to generate PDF:', error);
+                warnings.addGeneric('print', `Failed to generate PDF: ${error.message}`);
             }
         }
-
-        // Extract HTML from the page
-        console.log('[Extract] Extracting HTML...');
-        const pageData = await extractPageData(tab.id);
-        console.log('[Extract] HTML extracted, size:', pageData.html.length, 'chars');
 
         let result = null;
         let externalLinks = [];
@@ -1639,6 +1660,68 @@ function waitForTabLoad(tabId) {
 // Sleep utility
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Generate PDF using Chrome DevTools Protocol
+async function generatePdfUsingCDP(tabId, title) {
+    let debuggee = { tabId: tabId };
+
+    try {
+        // Attach debugger
+        console.log('[CDP] Attaching debugger to tab:', tabId);
+        await chrome.debugger.attach(debuggee, '1.3');
+
+        // A0 paper dimensions in inches (33.1 x 46.8 inches)
+        // Chrome uses inches for paper dimensions
+        const pdfOptions = {
+            printBackground: false,        // Don't print backgrounds
+            paperWidth: 33.1,             // A0 width in inches
+            paperHeight: 46.8,            // A0 height in inches
+            marginTop: 0.2,               // 0.5cm ≈ 0.2 inches
+            marginBottom: 0.2,
+            marginLeft: 0.2,
+            marginRight: 0.2,
+            scale: 1.0,                   // 100% scale
+            displayHeaderFooter: false,   // No header/footer
+            preferCSSPageSize: true,      // Use CSS @page size if specified
+            generateTaggedPDF: false,     // Faster generation
+            transferMode: 'ReturnAsBase64'
+        };
+
+        console.log('[CDP] Sending Page.printToPDF command with options:', pdfOptions);
+
+        // Send printToPDF command
+        const result = await chrome.debugger.sendCommand(
+            debuggee,
+            'Page.printToPDF',
+            pdfOptions
+        );
+
+        if (result && result.data) {
+            console.log('[CDP] PDF data received, converting from base64...');
+            // Convert base64 to Uint8Array
+            const binaryString = atob(result.data);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        } else {
+            throw new Error('No PDF data returned from Chrome DevTools Protocol');
+        }
+
+    } catch (error) {
+        console.error('[CDP] Error generating PDF:', error);
+        throw error;
+    } finally {
+        // Always detach debugger
+        try {
+            await chrome.debugger.detach(debuggee);
+            console.log('[CDP] Debugger detached');
+        } catch (detachError) {
+            console.warn('[CDP] Failed to detach debugger:', detachError);
+        }
+    }
 }
 
 // Send progress update to popup
