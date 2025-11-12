@@ -4,8 +4,7 @@
 // Import JSZip library for creating ZIP files
 importScripts('jszip.min.js');
 
-// Import screenshot and warnings utilities
-importScripts('screenshot-utils.js');
+// Import utilities
 importScripts('warnings-tracker.js');
 importScripts('job-storage.js');
 
@@ -226,7 +225,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 function showNotification(title, message, type = 'basic') {
     chrome.notifications.create({
         type: type,
-        iconUrl: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y="75" font-size="75">📄</text></svg>',
+        iconUrl: chrome.runtime.getURL('icons/icon48.png'),
         title: title,
         message: message,
         priority: 2
@@ -241,8 +240,7 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
             content: true,
             mediaLinks: false,
             externalLinks: false,
-            screenshot: false,
-            preserveColor: false
+            printToPdf: false
         };
     }
 
@@ -250,12 +248,37 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
     console.log('[Extract] Output as ZIP:', outputZip);
     console.log('[Extract] Download options:', downloadOptions);
 
+    // Create a local job to track this extraction
+    const jobId = `local-${Date.now()}`;
+    const jobData = {
+        id: jobId,
+        type: 'extract_page',
+        status: 'processing',
+        params: {
+            url: url,
+            title: `Extract: ${url}`,
+            output_zip: outputZip,
+            download_options: downloadOptions
+        },
+        created_at: new Date().toISOString(),
+        progress: 0
+    };
+
+    // Save job immediately so it appears in UI
+    await jobStorage.saveJob(jobData);
+    console.log('[Extract] Created job:', jobId);
+
     // Initialize warnings tracker
     const warnings = new WarningsTracker();
 
     // Check backend health first
     const health = await checkBackendHealth();
     if (!health.healthy) {
+        // Update job as failed
+        jobData.status = 'failed';
+        jobData.error = health.error;
+        await jobStorage.saveJob(jobData);
+
         showNotification('Backend Error', health.error);
         return {
             success: false,
@@ -280,17 +303,24 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
         console.log('[Extract] Waiting for dynamic content...');
         await sleep(DELAY_AFTER_LOAD);
 
-        // Detect infinite scroll before capturing screenshot
-        if (downloadOptions.screenshot) {
-            console.log('[Extract] Checking for infinite scroll...');
-            const infiniteScrollResult = await detectInfiniteScroll(tab.id);
-            if (infiniteScrollResult.hasInfiniteScroll) {
-                warnings.addInfiniteScrollWarning(url, infiniteScrollResult.confidence);
-            }
+        // Trigger print dialog if PDF printing is requested
+        if (downloadOptions.printToPdf) {
+            try {
+                console.log('[Extract] Opening print dialog...');
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    func: () => {
+                        window.print();
+                    }
+                });
+                console.log('[Extract] Print dialog opened');
 
-            // Additional wait for screenshot to ensure page is fully rendered
-            console.log('[Extract] Waiting for page to stabilize before screenshot...');
-            await sleep(2000); // Extra 2 second delay for screenshots
+                // Add informational note
+                warnings.addGeneric('print', 'Print dialog opened. Select "Save as PDF" as the destination to save the entire page as PDF.');
+            } catch (error) {
+                console.error('[Extract] Failed to open print dialog:', error);
+                warnings.addGeneric('print', `Failed to open print dialog: ${error.message}`);
+            }
         }
 
         // Extract HTML from the page
@@ -300,33 +330,6 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
 
         let result = null;
         let externalLinks = [];
-        let screenshotData = null;
-
-        // Capture screenshot if requested
-        if (downloadOptions.screenshot) {
-            try {
-                console.log('[Extract] Capturing screenshot...');
-                const screenshotResult = await captureFullPageScreenshot(tab.id, {
-                    preserveColor: downloadOptions.preserveColor || false,
-                    format: 'webp',  // Use WebP for better compression
-                    quality: 95  // High quality for sharp text and details
-                });
-
-                screenshotData = screenshotResult;
-
-                // Add any screenshot warnings
-                if (screenshotResult.warnings && screenshotResult.warnings.length > 0) {
-                    screenshotResult.warnings.forEach(msg => {
-                        warnings.addGeneric('screenshot', msg);
-                    });
-                }
-
-                console.log('[Extract] Screenshot captured successfully');
-            } catch (error) {
-                console.error('[Extract] Screenshot capture failed:', error);
-                warnings.addScreenshotFailure(url, error);
-            }
-        }
 
         // Process with backend if content is requested
         if (downloadOptions.content) {
@@ -385,20 +388,6 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
             });
         }
 
-        // Add screenshot if captured
-        if (screenshotData && screenshotData.dataUrl) {
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            // Bug fix #6: Add fallback for empty/undefined titles
-            const pageTitle = (pageData.title || 'page').replace(/[^a-z0-9]/gi, '_').substring(0, 50);
-            const screenshotFilename = `screenshot_${pageTitle}_${timestamp}.${screenshotData.format}`;
-
-            filesToDownload.push({
-                content: screenshotData.dataUrl,
-                filename: screenshotFilename,
-                isDataUrl: true  // Flag to handle data URLs differently
-            });
-        }
-
         // Add warnings.txt if there are any warnings
         if (warnings.hasWarnings()) {
             const warningsText = warnings.exportAsText();
@@ -448,7 +437,7 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
                 console.log('[Extract] Downloading:', file.filename);
 
                 if (file.isDataUrl) {
-                    // For data URLs (screenshots), download directly
+                    // For data URLs (images, media), download directly
                     await chrome.downloads.download({
                         url: file.content,
                         filename: file.filename,
@@ -474,6 +463,16 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
 
         console.log('[Extract] Success!');
 
+        // Update job as completed
+        jobData.status = 'completed';
+        jobData.completed_at = new Date().toISOString();
+        jobData.result = {
+            filename: result?.filename || 'links',
+            word_count: result?.word_count || 0,
+            used_ai: result?.used_ai || false
+        };
+        await jobStorage.saveJob(jobData);
+
         return {
             success: true,
             filename: result?.filename || 'links',
@@ -483,6 +482,13 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
     } catch (error) {
         console.error('[Extract] Error:', error);
         showNotification('Extraction Failed', error.message);
+
+        // Update job as failed
+        jobData.status = 'failed';
+        jobData.completed_at = new Date().toISOString();
+        jobData.error = error.message;
+        await jobStorage.saveJob(jobData);
+
         return {
             success: false,
             error: error.message
@@ -503,17 +509,34 @@ async function handleMapSite(startUrl, depth) {
         };
     }
 
+    // Create descriptive title for the job
+    const jobTitle = `Site Map: ${startUrl}`;
+
+    // Create a temporary local job IMMEDIATELY so it appears in UI
+    const tempJobId = `temp-${Date.now()}`;
+    const tempJobData = {
+        id: tempJobId,
+        type: 'site_map',
+        status: 'processing',
+        params: {
+            start_url: startUrl,
+            max_depth: depth,
+            title: jobTitle
+        },
+        created_at: new Date().toISOString(),
+        progress: 0
+    };
+    await jobStorage.saveJob(tempJobData);
+    console.log('[Map] Created temporary local job:', tempJobId);
+
     showNotification('Site Mapping', `Mapping site with depth ${depth}...`);
 
     let jobId = null;
 
     try {
-        // Create a site mapping job
+        // Create a site mapping job on backend
         const storage = await chrome.storage.local.get(['apiUrl']);
         const apiUrl = storage.apiUrl || 'http://localhost:8077';
-
-        // Create descriptive title for the job
-        const jobTitle = `Site Map: ${startUrl}`;
 
         const jobResponse = await fetch(`${apiUrl}/site-map/start`, {
             method: 'POST',
@@ -530,7 +553,7 @@ async function handleMapSite(startUrl, depth) {
             jobId = jobData.job_id;
             siteMappingState.currentJobId = jobId;
             siteMappingState.isPaused = false;
-            console.log('[Map] Created site mapping job:', jobId);
+            console.log('[Map] Created backend job:', jobId);
 
             // Ensure params has title and start_url for display purposes
             if (!jobData.params) {
@@ -539,8 +562,17 @@ async function handleMapSite(startUrl, depth) {
             jobData.params.title = jobTitle;
             jobData.params.start_url = startUrl;
 
-            // Save job to IndexedDB for persistence (Bug fix #4)
+            // Save backend job to IndexedDB (replaces temp job)
             await jobStorage.saveJob(jobData);
+
+            // Remove temporary job
+            await jobStorage.deleteJob(tempJobId);
+            console.log('[Map] Replaced temp job with backend job');
+        } else {
+            // Backend job creation failed, keep using temp job
+            console.warn('[Map] Backend job creation failed, using temp job');
+            jobId = tempJobId;
+            siteMappingState.currentJobId = tempJobId;
         }
 
         const discoveredUrls = new Set([startUrl]);
@@ -569,12 +601,24 @@ async function handleMapSite(startUrl, depth) {
 
             processedUrls.add(url);
 
-            // Open tab and extract links
-            const tab = await chrome.tabs.create({ url, active: false });
-            await waitForTabLoad(tab.id);
-            await sleep(1000); // Shorter delay for mapping
-
+            let tab = null;
             try {
+                // Open tab with timeout
+                console.log(`[Map] Processing URL ${processedUrls.size}/${urlsToProcess.length + processedUrls.size}: ${url}`);
+
+                tab = await Promise.race([
+                    chrome.tabs.create({ url, active: false }),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Tab creation timeout')), 30000))
+                ]);
+
+                // Wait for page load with timeout
+                await Promise.race([
+                    waitForTabLoad(tab.id),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Page load timeout')), 30000))
+                ]);
+
+                await sleep(1000); // Shorter delay for mapping
+
                 const pageData = await extractPageData(tab.id);
 
                 // Extract links using backend
@@ -583,6 +627,7 @@ async function handleMapSite(startUrl, depth) {
                 // Close tab after extraction
                 try {
                     await chrome.tabs.remove(tab.id);
+                    tab = null; // Mark as closed
                 } catch (tabError) {
                     console.warn('[Map] Could not close tab:', tabError.message);
                 }
@@ -632,8 +677,15 @@ async function handleMapSite(startUrl, depth) {
                     }).catch(err => console.warn('[Map] Failed to update progress:', err));
                 }
             } catch (error) {
-                console.error(`Error processing ${url}:`, error);
-                await chrome.tabs.remove(tab.id).catch(() => {});
+                console.error(`[Map] Error processing ${url}:`, error);
+                // Try to close tab if it was created
+                if (tab) {
+                    try {
+                        await chrome.tabs.remove(tab.id);
+                    } catch (tabError) {
+                        console.warn('[Map] Could not close tab after error:', tabError.message);
+                    }
+                }
             }
         }
 
@@ -876,18 +928,31 @@ async function continueSiteMapping(jobId, savedState) {
 
             processedUrls.add(url);
 
-            // Open tab and extract links
-            const tab = await chrome.tabs.create({ url, active: false });
-            await waitForTabLoad(tab.id);
-            await sleep(1000);
-
+            let tab = null;
             try {
+                // Open tab with timeout
+                console.log(`[Map Resume] Processing URL ${processedUrls.size}/${urlsToProcess.length + processedUrls.size}: ${url}`);
+
+                tab = await Promise.race([
+                    chrome.tabs.create({ url, active: false }),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Tab creation timeout')), 30000))
+                ]);
+
+                // Wait for page load with timeout
+                await Promise.race([
+                    waitForTabLoad(tab.id),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Page load timeout')), 30000))
+                ]);
+
+                await sleep(1000);
+
                 const pageData = await extractPageData(tab.id);
                 const links = await extractLinks(pageData.html, url);
 
                 // Close tab
                 try {
                     await chrome.tabs.remove(tab.id);
+                    tab = null; // Mark as closed
                 } catch (tabError) {
                     console.warn('[Map] Could not close tab:', tabError.message);
                 }
@@ -936,8 +1001,15 @@ async function continueSiteMapping(jobId, savedState) {
                     }).catch(err => console.warn('[Map] Failed to update progress:', err));
                 }
             } catch (error) {
-                console.error(`Error processing ${url}:`, error);
-                await chrome.tabs.remove(tab.id).catch(() => {});
+                console.error(`[Map Resume] Error processing ${url}:`, error);
+                // Try to close tab if it was created
+                if (tab) {
+                    try {
+                        await chrome.tabs.remove(tab.id);
+                    } catch (tabError) {
+                        console.warn('[Map] Could not close tab after error:', tabError.message);
+                    }
+                }
             }
         }
 
