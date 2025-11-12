@@ -4,11 +4,24 @@
 // Import JSZip library for creating ZIP files
 importScripts('jszip.min.js');
 
+// Import screenshot and warnings utilities
+importScripts('screenshot-utils.js');
+importScripts('warnings-tracker.js');
+importScripts('job-storage.js');
+
 const API_BASE_URL = 'http://localhost:8077';
 const DELAY_AFTER_LOAD = 2000; // Wait 2 seconds after page load for dynamic content
 
 console.log('[Simple Page Saver] Background service worker loaded');
 console.log('[Simple Page Saver] JSZip available:', typeof JSZip !== 'undefined');
+
+// Initialize job storage
+console.log('[JobStorage] Initializing IndexedDB...');
+jobStorage.init().then(() => {
+    console.log('[JobStorage] IndexedDB initialized successfully');
+}).catch(error => {
+    console.error('[JobStorage] Failed to initialize IndexedDB:', error);
+});
 
 // Connection state management
 const connectionState = {
@@ -17,6 +30,17 @@ const connectionState = {
     consecutiveFailures: 0,
     aiEnabled: false,
     monitoring: false
+};
+
+// Site mapping state (for pause/resume)
+const siteMappingState = {
+    currentJobId: null,
+    isPaused: false,
+    discoveredUrls: new Set(),
+    processedUrls: new Set(),
+    urlsToProcess: [],
+    urlDataList: [],
+    parentMap: new Map() // Track parent-child relationships
 };
 
 // Start periodic health monitoring
@@ -180,6 +204,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 sendResponse({ success: false, error: error.message });
             });
         return true;
+    } else if (request.action === 'PAUSE_JOB') {
+        handlePauseJob(request.jobId)
+            .then(response => sendResponse(response))
+            .catch(error => sendResponse({ success: false, error: error.message }));
+        return true;
+    } else if (request.action === 'RESUME_JOB') {
+        handleResumeJob(request.jobId)
+            .then(response => sendResponse(response))
+            .catch(error => sendResponse({ success: false, error: error.message }));
+        return true;
+    } else if (request.action === 'STOP_JOB') {
+        handleStopJob(request.jobId)
+            .then(response => sendResponse(response))
+            .catch(error => sendResponse({ success: false, error: error.message }));
+        return true;
     }
 });
 
@@ -201,13 +240,18 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
         downloadOptions = {
             content: true,
             mediaLinks: false,
-            externalLinks: false
+            externalLinks: false,
+            screenshot: false,
+            preserveColor: false
         };
     }
 
     console.log('[Extract] Starting extraction for:', url);
     console.log('[Extract] Output as ZIP:', outputZip);
     console.log('[Extract] Download options:', downloadOptions);
+
+    // Initialize warnings tracker
+    const warnings = new WarningsTracker();
 
     // Check backend health first
     const health = await checkBackendHealth();
@@ -236,6 +280,15 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
         console.log('[Extract] Waiting for dynamic content...');
         await sleep(DELAY_AFTER_LOAD);
 
+        // Detect infinite scroll before capturing screenshot
+        if (downloadOptions.screenshot) {
+            console.log('[Extract] Checking for infinite scroll...');
+            const infiniteScrollResult = await detectInfiniteScroll(tab.id);
+            if (infiniteScrollResult.hasInfiniteScroll) {
+                warnings.addInfiniteScrollWarning(url, infiniteScrollResult.confidence);
+            }
+        }
+
         // Extract HTML from the page
         console.log('[Extract] Extracting HTML...');
         const pageData = await extractPageData(tab.id);
@@ -243,6 +296,33 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
 
         let result = null;
         let externalLinks = [];
+        let screenshotData = null;
+
+        // Capture screenshot if requested
+        if (downloadOptions.screenshot) {
+            try {
+                console.log('[Extract] Capturing screenshot...');
+                const screenshotResult = await captureFullPageScreenshot(tab.id, {
+                    preserveColor: downloadOptions.preserveColor || false,
+                    format: 'webp',  // Use WebP for better compression
+                    quality: 85
+                });
+
+                screenshotData = screenshotResult;
+
+                // Add any screenshot warnings
+                if (screenshotResult.warnings && screenshotResult.warnings.length > 0) {
+                    screenshotResult.warnings.forEach(msg => {
+                        warnings.addGeneric('screenshot', msg);
+                    });
+                }
+
+                console.log('[Extract] Screenshot captured successfully');
+            } catch (error) {
+                console.error('[Extract] Screenshot capture failed:', error);
+                warnings.addScreenshotFailure(url, error);
+            }
+        }
 
         // Process with backend if content is requested
         if (downloadOptions.content) {
@@ -301,14 +381,45 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
             });
         }
 
+        // Add screenshot if captured
+        if (screenshotData && screenshotData.dataUrl) {
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            // Bug fix #6: Add fallback for empty/undefined titles
+            const pageTitle = (pageData.title || 'page').replace(/[^a-z0-9]/gi, '_').substring(0, 50);
+            const screenshotFilename = `screenshot_${pageTitle}_${timestamp}.${screenshotData.format}`;
+
+            filesToDownload.push({
+                content: screenshotData.dataUrl,
+                filename: screenshotFilename,
+                isDataUrl: true  // Flag to handle data URLs differently
+            });
+        }
+
+        // Add warnings.txt if there are any warnings
+        if (warnings.hasWarnings()) {
+            const warningsText = warnings.exportAsText();
+            filesToDownload.push({
+                content: warningsText,
+                filename: 'warnings.txt'
+            });
+            console.log(`[Extract] ${warnings.count()} warnings will be included in download`);
+        }
+
         // Download based on ZIP preference
         if (outputZip && filesToDownload.length > 0) {
             // Create ZIP file with selected files
             console.log('[Extract] Creating ZIP file with', filesToDownload.length, 'files...');
             const zip = new JSZip();
-            filesToDownload.forEach(file => {
-                zip.file(file.filename, file.content);
-            });
+
+            for (const file of filesToDownload) {
+                if (file.isDataUrl) {
+                    // Convert data URL to binary for ZIP
+                    const base64Data = file.content.split(',')[1];
+                    zip.file(file.filename, base64Data, {base64: true});
+                } else {
+                    zip.file(file.filename, file.content);
+                }
+            }
 
             const blob = await zip.generateAsync({type: 'blob', compression: 'DEFLATE'});
             const reader = new FileReader();
@@ -331,7 +442,18 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
             // Download individual files
             for (const file of filesToDownload) {
                 console.log('[Extract] Downloading:', file.filename);
-                await downloadFile(file.content, file.filename);
+
+                if (file.isDataUrl) {
+                    // For data URLs (screenshots), download directly
+                    await chrome.downloads.download({
+                        url: file.content,
+                        filename: file.filename,
+                        saveAs: false
+                    });
+                } else {
+                    // For text content, use existing downloadFile function
+                    await downloadFile(file.content, file.filename);
+                }
             }
 
             showNotification('Extraction Complete', `Downloaded ${filesToDownload.length} file(s)`);
@@ -398,19 +520,36 @@ async function handleMapSite(startUrl, depth) {
         if (jobResponse.ok) {
             const jobData = await jobResponse.json();
             jobId = jobData.job_id;
+            siteMappingState.currentJobId = jobId;
+            siteMappingState.isPaused = false;
             console.log('[Map] Created site mapping job:', jobId);
+
+            // Save job to IndexedDB for persistence (Bug fix #4)
+            await jobStorage.saveJob(jobData);
         }
 
         const discoveredUrls = new Set([startUrl]);
         const processedUrls = new Set();
-        const urlsToProcess = [{ url: startUrl, level: 0 }];
+        const urlsToProcess = [{ url: startUrl, level: 0, parent: null }];
         const urlDataList = [];
 
-        while (urlsToProcess.length > 0) {
-            const { url, level } = urlsToProcess.shift();
+        // Store state in siteMappingState for pause/resume
+        siteMappingState.discoveredUrls = discoveredUrls;
+        siteMappingState.processedUrls = processedUrls;
+        siteMappingState.urlsToProcess = urlsToProcess;
+        siteMappingState.urlDataList = urlDataList;
+
+        while (urlsToProcess.length > 0 && !siteMappingState.isPaused) {
+            const { url, level, parent } = urlsToProcess.shift();
 
             if (processedUrls.has(url) || level > depth) {
                 continue;
+            }
+
+            // Check for pause again after async operations (Bug fix #1)
+            if (siteMappingState.isPaused) {
+                console.log('[Map] Job paused by user');
+                break;
             }
 
             processedUrls.add(url);
@@ -438,8 +577,10 @@ async function handleMapSite(startUrl, depth) {
                     for (const link of links.internal_links) {
                         if (!discoveredUrls.has(link)) {
                             discoveredUrls.add(link);
-                            urlsToProcess.push({ url: link, level: level + 1 });
-                            urlDataList.push({ url: link, type: 'internal', level: level + 1 });
+                            urlsToProcess.push({ url: link, level: level + 1, parent: url });
+                            urlDataList.push({ url: link, type: 'internal', level: level + 1, parent: url });
+                            // Track parent-child relationship (Bug fix #2)
+                            siteMappingState.parentMap.set(link, url);
                         }
                     }
                 }
@@ -448,7 +589,8 @@ async function handleMapSite(startUrl, depth) {
                 for (const link of links.external_links) {
                     if (!discoveredUrls.has(link)) {
                         discoveredUrls.add(link);
-                        urlDataList.push({ url: link, type: 'external', level: level + 1 });
+                        urlDataList.push({ url: link, type: 'external', level: level + 1, parent: url });
+                        siteMappingState.parentMap.set(link, url);
                     }
                 }
 
@@ -456,7 +598,8 @@ async function handleMapSite(startUrl, depth) {
                 for (const link of links.media_links) {
                     if (!discoveredUrls.has(link)) {
                         discoveredUrls.add(link);
-                        urlDataList.push({ url: link, type: 'media', level: level + 1 });
+                        urlDataList.push({ url: link, type: 'media', level: level + 1, parent: url });
+                        siteMappingState.parentMap.set(link, url);
                     }
                 }
 
@@ -479,10 +622,50 @@ async function handleMapSite(startUrl, depth) {
             }
         }
 
-        // Add the start URL to the list
-        urlDataList.unshift({ url: startUrl, type: 'internal', level: 0 });
+        // Add the start URL to the list if not already there
+        if (!urlDataList.some(u => u.url === startUrl)) {
+            urlDataList.unshift({ url: startUrl, type: 'internal', level: 0, parent: null });
+        }
 
-        // Complete the job
+        // Handle paused state (Bug fix #3)
+        if (siteMappingState.isPaused) {
+            console.log('[Map] Saving paused job state to IndexedDB...');
+
+            // Save complete job state for resume
+            const jobState = {
+                discoveredUrls: Array.from(discoveredUrls),
+                processedUrls: Array.from(processedUrls),
+                urlsToProcess: urlsToProcess,
+                urlDataList: urlDataList,
+                parentMap: Array.from(siteMappingState.parentMap.entries()),
+                startUrl: startUrl,
+                depth: depth
+            };
+
+            // Update job in IndexedDB with saved state
+            const job = await jobStorage.getJob(jobId);
+            if (job) {
+                job.params.saved_state = jobState;
+                job.status = 'paused';
+                job.result = {
+                    discovered_urls: urlDataList.map(u => u.url),
+                    total_discovered: discoveredUrls.size,
+                    urlDataList: urlDataList
+                };
+                await jobStorage.saveJob(job);
+            }
+
+            showNotification('Mapping Paused', `Paused at ${discoveredUrls.size} URLs discovered`);
+
+            return {
+                success: true,
+                urls: urlDataList,
+                jobId: jobId,
+                paused: true
+            };
+        }
+
+        // Complete the job (only if not paused)
         if (jobId) {
             const allUrls = Array.from(discoveredUrls);
             await fetch(`${apiUrl}/site-map/complete`, {
@@ -493,6 +676,18 @@ async function handleMapSite(startUrl, depth) {
                     discovered_urls: allUrls
                 })
             }).catch(err => console.warn('[Map] Failed to complete job:', err));
+
+            // Save completed job to IndexedDB
+            const job = await jobStorage.getJob(jobId);
+            if (job) {
+                job.status = 'completed';
+                job.result = {
+                    discovered_urls: allUrls,
+                    total_discovered: discoveredUrls.size,
+                    urlDataList: urlDataList
+                };
+                await jobStorage.saveJob(job);
+            }
         }
 
         showNotification('Mapping Complete', `Found ${urlDataList.length} URLs (Internal: ${urlDataList.filter(u => u.type === 'internal').length}, External: ${urlDataList.filter(u => u.type === 'external').length}, Media: ${urlDataList.filter(u => u.type === 'media').length})`);
@@ -510,6 +705,309 @@ async function handleMapSite(startUrl, depth) {
             error: error.message,
             urls: []
         };
+    }
+}
+
+// Pause a job
+async function handlePauseJob(jobId) {
+    try {
+        console.log('[Job] Pausing job:', jobId);
+
+        // Set local pause flag
+        if (siteMappingState.currentJobId === jobId) {
+            siteMappingState.isPaused = true;
+        }
+
+        // Update backend
+        const storage = await chrome.storage.local.get(['apiEndpoint']);
+        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+
+        const response = await fetch(`${apiUrl}/jobs/${jobId}/pause`, {
+            method: 'POST'
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to pause job: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+
+        // Save complete job to IndexedDB (Bug fix #3)
+        const job = await jobStorage.getJob(jobId);
+        if (job) {
+            // Update with latest from backend
+            job.status = 'paused';
+            if (result.job) {
+                job.progress = result.job.progress || job.progress;
+                job.result = result.job.result || job.result;
+            }
+            await jobStorage.saveJob(job);
+        } else {
+            // If not in IndexedDB, save the one from backend
+            if (result.job) {
+                await jobStorage.saveJob(result.job);
+            }
+        }
+
+        console.log('[Job] Job paused successfully and saved to IndexedDB');
+        return { success: true, message: 'Job paused', job: result.job };
+
+    } catch (error) {
+        console.error('[Job] Failed to pause job:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// Resume a job
+async function handleResumeJob(jobId) {
+    try {
+        console.log('[Job] Resuming job:', jobId);
+
+        // Get job from IndexedDB to retrieve saved state
+        const job = await jobStorage.getJob(jobId);
+        if (!job) {
+            throw new Error('Job not found in IndexedDB');
+        }
+
+        // Clear local pause flag
+        siteMappingState.currentJobId = jobId;
+        siteMappingState.isPaused = false;
+
+        // Update backend
+        const storage = await chrome.storage.local.get(['apiEndpoint']);
+        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+
+        const response = await fetch(`${apiUrl}/jobs/${jobId}/resume`, {
+            method: 'POST'
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to resume job: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+
+        // Save to IndexedDB
+        await jobStorage.updateJobStatus(jobId, 'processing');
+
+        console.log('[Job] Job resumed successfully');
+
+        // Continue site mapping from saved state (Bug fix #2)
+        if (job.type === 'site_map' && job.params.saved_state) {
+            console.log('[Job] Continuing site mapping from saved state...');
+            await continueSiteMapping(jobId, job.params.saved_state);
+        }
+
+        return { success: true, message: 'Job resumed', job: result.job };
+
+    } catch (error) {
+        console.error('[Job] Failed to resume job:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// Continue site mapping from saved state
+async function continueSiteMapping(jobId, savedState) {
+    try {
+        console.log('[Map] Resuming site mapping with saved state');
+
+        // Restore state
+        const discoveredUrls = new Set(savedState.discoveredUrls);
+        const processedUrls = new Set(savedState.processedUrls);
+        const urlsToProcess = savedState.urlsToProcess;
+        const urlDataList = savedState.urlDataList;
+        const parentMap = new Map(savedState.parentMap);
+        const startUrl = savedState.startUrl;
+        const depth = savedState.depth;
+
+        // Update siteMappingState
+        siteMappingState.discoveredUrls = discoveredUrls;
+        siteMappingState.processedUrls = processedUrls;
+        siteMappingState.urlsToProcess = urlsToProcess;
+        siteMappingState.urlDataList = urlDataList;
+        siteMappingState.parentMap = parentMap;
+
+        const storage = await chrome.storage.local.get(['apiUrl']);
+        const apiUrl = storage.apiUrl || 'http://localhost:8077';
+
+        console.log(`[Map] Resuming with ${urlsToProcess.length} URLs to process, ${discoveredUrls.size} discovered so far`);
+
+        // Continue processing from where we left off
+        while (urlsToProcess.length > 0 && !siteMappingState.isPaused) {
+            const { url, level, parent } = urlsToProcess.shift();
+
+            if (processedUrls.has(url) || level > depth) {
+                continue;
+            }
+
+            // Check for pause
+            if (siteMappingState.isPaused) {
+                console.log('[Map] Job paused during resume');
+                break;
+            }
+
+            processedUrls.add(url);
+
+            // Open tab and extract links
+            const tab = await chrome.tabs.create({ url, active: false });
+            await waitForTabLoad(tab.id);
+            await sleep(1000);
+
+            try {
+                const pageData = await extractPageData(tab.id);
+                const links = await extractLinks(pageData.html, url);
+
+                // Close tab
+                try {
+                    await chrome.tabs.remove(tab.id);
+                } catch (tabError) {
+                    console.warn('[Map] Could not close tab:', tabError.message);
+                }
+
+                // Process internal links
+                if (level < depth) {
+                    for (const link of links.internal_links) {
+                        if (!discoveredUrls.has(link)) {
+                            discoveredUrls.add(link);
+                            urlsToProcess.push({ url: link, level: level + 1, parent: url });
+                            urlDataList.push({ url: link, type: 'internal', level: level + 1, parent: url });
+                            siteMappingState.parentMap.set(link, url);
+                        }
+                    }
+                }
+
+                // Add external links
+                for (const link of links.external_links) {
+                    if (!discoveredUrls.has(link)) {
+                        discoveredUrls.add(link);
+                        urlDataList.push({ url: link, type: 'external', level: level + 1, parent: url });
+                        siteMappingState.parentMap.set(link, url);
+                    }
+                }
+
+                // Add media links
+                for (const link of links.media_links) {
+                    if (!discoveredUrls.has(link)) {
+                        discoveredUrls.add(link);
+                        urlDataList.push({ url: link, type: 'media', level: level + 1, parent: url });
+                        siteMappingState.parentMap.set(link, url);
+                    }
+                }
+
+                // Update job progress
+                if (jobId) {
+                    fetch(`${apiUrl}/site-map/progress`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            job_id: jobId,
+                            discovered_count: discoveredUrls.size,
+                            total_to_process: urlsToProcess.length + processedUrls.size,
+                            message: `Discovered ${discoveredUrls.size} URLs (${processedUrls.size} processed)`
+                        })
+                    }).catch(err => console.warn('[Map] Failed to update progress:', err));
+                }
+            } catch (error) {
+                console.error(`Error processing ${url}:`, error);
+                await chrome.tabs.remove(tab.id).catch(() => {});
+            }
+        }
+
+        // Handle completion or pause
+        if (siteMappingState.isPaused) {
+            console.log('[Map] Saving paused state after resume...');
+
+            const jobState = {
+                discoveredUrls: Array.from(discoveredUrls),
+                processedUrls: Array.from(processedUrls),
+                urlsToProcess: urlsToProcess,
+                urlDataList: urlDataList,
+                parentMap: Array.from(siteMappingState.parentMap.entries()),
+                startUrl: startUrl,
+                depth: depth
+            };
+
+            const job = await jobStorage.getJob(jobId);
+            if (job) {
+                job.params.saved_state = jobState;
+                job.status = 'paused';
+                job.result = {
+                    discovered_urls: urlDataList.map(u => u.url),
+                    total_discovered: discoveredUrls.size,
+                    urlDataList: urlDataList
+                };
+                await jobStorage.saveJob(job);
+            }
+
+            showNotification('Mapping Paused', `Paused at ${discoveredUrls.size} URLs discovered`);
+        } else {
+            // Complete the job
+            console.log('[Map] Job completed after resume');
+            const allUrls = Array.from(discoveredUrls);
+            await fetch(`${apiUrl}/site-map/complete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    job_id: jobId,
+                    discovered_urls: allUrls
+                })
+            }).catch(err => console.warn('[Map] Failed to complete job:', err));
+
+            const job = await jobStorage.getJob(jobId);
+            if (job) {
+                job.status = 'completed';
+                job.result = {
+                    discovered_urls: allUrls,
+                    total_discovered: discoveredUrls.size,
+                    urlDataList: urlDataList
+                };
+                job.params.saved_state = null; // Clear saved state
+                await jobStorage.saveJob(job);
+            }
+
+            showNotification('Mapping Complete', `Found ${urlDataList.length} URLs`);
+        }
+
+    } catch (error) {
+        console.error('[Map] Error continuing site mapping:', error);
+        showNotification('Mapping Failed', error.message);
+    }
+}
+
+// Stop a job
+async function handleStopJob(jobId) {
+    try {
+        console.log('[Job] Stopping job:', jobId);
+
+        // Stop local processing
+        if (siteMappingState.currentJobId === jobId) {
+            siteMappingState.isPaused = true;
+            siteMappingState.currentJobId = null;
+        }
+
+        // Update backend
+        const storage = await chrome.storage.local.get(['apiEndpoint']);
+        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+
+        const response = await fetch(`${apiUrl}/jobs/${jobId}/stop`, {
+            method: 'POST'
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to stop job: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+
+        // Save to IndexedDB (stopped jobs are paused)
+        await jobStorage.updateJobStatus(jobId, 'paused');
+
+        console.log('[Job] Job stopped successfully');
+        return { success: true, message: 'Job stopped. Discovered data preserved.', job: result.job };
+
+    } catch (error) {
+        console.error('[Job] Failed to stop job:', error);
+        return { success: false, error: error.message };
     }
 }
 

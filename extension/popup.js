@@ -63,6 +63,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log('[Prompt] Custom prompt saved');
     });
 
+    // Screenshot checkbox - enable/disable preserve color option
+    document.getElementById('include-screenshot').addEventListener('change', (e) => {
+        const preserveColorCheckbox = document.getElementById('preserve-color');
+        preserveColorCheckbox.disabled = !e.target.checked;
+        if (!e.target.checked) {
+            preserveColorCheckbox.checked = false;
+        }
+    });
+
     // Load AI enabled setting
     await loadAISettings();
 
@@ -146,10 +155,12 @@ async function extractCurrentPage() {
         const downloadContent = document.getElementById('download-content').checked;
         const downloadMediaLinks = document.getElementById('download-media-links').checked;
         const downloadExternalLinks = document.getElementById('download-external-links').checked;
+        const includeScreenshot = document.getElementById('include-screenshot').checked;
+        const preserveColor = document.getElementById('preserve-color').checked;
         const useZip = document.getElementById('single-page-zip').checked;
 
         // Validate at least one option selected
-        if (!downloadContent && !downloadMediaLinks && !downloadExternalLinks) {
+        if (!downloadContent && !downloadMediaLinks && !downloadExternalLinks && !includeScreenshot) {
             showStatus('Please select at least one download option', 'error');
             disableButtons(false);
             return;
@@ -163,7 +174,9 @@ async function extractCurrentPage() {
             downloadOptions: {
                 content: downloadContent,
                 mediaLinks: downloadMediaLinks,
-                externalLinks: downloadExternalLinks
+                externalLinks: downloadExternalLinks,
+                screenshot: includeScreenshot,
+                preserveColor: preserveColor
             }
         });
 
@@ -814,17 +827,30 @@ function createJobElement(job) {
     // Show load button for ALL completed jobs
     const showLoadButton = job.status === 'completed';
 
+    // Show pause button for processing jobs
+    const showPauseButton = job.status === 'processing';
+
+    // Show resume/view button for paused jobs
+    const showResumeButton = job.status === 'paused';
+
+    // Show stop button for processing jobs
+    const showStopButton = job.status === 'processing';
+
     div.innerHTML = `
         <div class="job-header">
             <div class="job-title" title="${title}">${truncate(title, 35)}</div>
             <div style="display: flex; align-items: center; gap: 5px;">
                 <div class="job-status ${job.status}">${statusText}</div>
                 ${showLoadButton ? '<button class="job-load" title="Load discovered URLs">Load</button>' : ''}
+                ${showResumeButton ? '<button class="job-resume" title="Resume job">Resume</button>' : ''}
+                ${showResumeButton ? '<button class="job-view-progress" title="View progress">View</button>' : ''}
+                ${showPauseButton ? '<button class="job-pause" title="Pause job">Pause</button>' : ''}
+                ${showStopButton ? '<button class="job-stop" title="Stop job">Stop</button>' : ''}
                 ${showRemoveButton ? '<button class="job-remove" title="Remove from list">×</button>' : ''}
             </div>
         </div>
         ${progress.message ? `<div class="job-progress">${progress.message}</div>` : ''}
-        ${job.status === 'processing' || job.status === 'pending' ? `
+        ${job.status === 'processing' || job.status === 'pending' || job.status === 'paused' ? `
             <div class="job-progress-bar">
                 <div class="job-progress-fill" style="width: ${progress.percent || 0}%"></div>
             </div>
@@ -834,7 +860,13 @@ function createJobElement(job) {
 
     // Add click handler for job details (not on action buttons)
     div.addEventListener('click', (e) => {
-        if (!e.target.classList.contains('job-remove') && !e.target.classList.contains('job-load')) {
+        const isActionButton = e.target.classList.contains('job-remove') ||
+                               e.target.classList.contains('job-load') ||
+                               e.target.classList.contains('job-pause') ||
+                               e.target.classList.contains('job-resume') ||
+                               e.target.classList.contains('job-stop') ||
+                               e.target.classList.contains('job-view-progress');
+        if (!isActionButton) {
             handleJobClick(job);
         }
     });
@@ -846,6 +878,47 @@ function createJobElement(job) {
             loadBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 loadJobContext(job);
+            });
+        }
+    }
+
+    // Add click handler for pause button
+    if (showPauseButton) {
+        const pauseBtn = div.querySelector('.job-pause');
+        if (pauseBtn) {
+            pauseBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await pauseJob(job.id);
+            });
+        }
+    }
+
+    // Add click handler for resume button
+    if (showResumeButton) {
+        const resumeBtn = div.querySelector('.job-resume');
+        if (resumeBtn) {
+            resumeBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await resumeJob(job.id);
+            });
+        }
+
+        const viewBtn = div.querySelector('.job-view-progress');
+        if (viewBtn) {
+            viewBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                viewJobProgress(job);
+            });
+        }
+    }
+
+    // Add click handler for stop button
+    if (showStopButton) {
+        const stopBtn = div.querySelector('.job-stop');
+        if (stopBtn) {
+            stopBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await stopJob(job.id);
             });
         }
     }
@@ -1001,6 +1074,109 @@ async function removeJob(jobId) {
     } catch (error) {
         console.error('[Jobs] Error removing job:', error);
         showStatus('Failed to remove job', 'error');
+    }
+}
+
+// Pause a job
+async function pauseJob(jobId) {
+    console.log('[Jobs] Pausing job:', jobId);
+
+    try {
+        const response = await chrome.runtime.sendMessage({
+            action: 'PAUSE_JOB',
+            jobId: jobId
+        });
+
+        if (response && response.success) {
+            showStatus('Job paused successfully', 'success');
+            await loadActiveJobs(); // Refresh list
+        } else {
+            throw new Error(response.error || 'Failed to pause job');
+        }
+    } catch (error) {
+        console.error('[Jobs] Error pausing job:', error);
+        showStatus(`Failed to pause job: ${error.message}`, 'error');
+    }
+}
+
+// Resume a job
+async function resumeJob(jobId) {
+    console.log('[Jobs] Resuming job:', jobId);
+
+    try {
+        const response = await chrome.runtime.sendMessage({
+            action: 'RESUME_JOB',
+            jobId: jobId
+        });
+
+        if (response && response.success) {
+            showStatus('Job resumed successfully', 'success');
+            await loadActiveJobs(); // Refresh list
+        } else {
+            throw new Error(response.error || 'Failed to resume job');
+        }
+    } catch (error) {
+        console.error('[Jobs] Error resuming job:', error);
+        showStatus(`Failed to resume job: ${error.message}`, 'error');
+    }
+}
+
+// Stop a job
+async function stopJob(jobId) {
+    console.log('[Jobs] Stopping job:', jobId);
+
+    try {
+        const response = await chrome.runtime.sendMessage({
+            action: 'STOP_JOB',
+            jobId: jobId
+        });
+
+        if (response && response.success) {
+            showStatus('Job stopped. Discovered data preserved.', 'success');
+            await loadActiveJobs(); // Refresh list
+        } else {
+            throw new Error(response.error || 'Failed to stop job');
+        }
+    } catch (error) {
+        console.error('[Jobs] Error stopping job:', error);
+        showStatus(`Failed to stop job: ${error.message}`, 'error');
+    }
+}
+
+// View job progress
+async function viewJobProgress(job) {
+    console.log('[Jobs] Viewing progress for job:', job.id);
+
+    try {
+        // For site mapping jobs, load the discovered URLs
+        if (job.type === 'site_map') {
+            if (job.result && job.result.discovered_urls) {
+                // Load URLs into site mapping section
+                await loadJobContext(job);
+                showStatus(`Loaded ${job.result.discovered_urls.length} discovered URLs`, 'success');
+            } else {
+                // Fetch current progress from backend
+                const storage = await chrome.storage.local.get(['apiUrl']);
+                const apiUrl = storage.apiUrl || 'http://localhost:8077';
+
+                const response = await fetch(`${apiUrl}/jobs/${job.id}`);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch job progress');
+                }
+
+                const jobData = await response.json();
+                const progress = jobData.progress || {};
+
+                showStatus(`Job progress: ${progress.message || 'No progress data'}`, 'info');
+            }
+        } else {
+            // For other job types, show progress
+            const progress = job.progress || {};
+            showStatus(`Progress: ${progress.message || 'No progress data available'}`, 'info');
+        }
+    } catch (error) {
+        console.error('[Jobs] Error viewing job progress:', error);
+        showStatus(`Failed to view progress: ${error.message}`, 'error');
     }
 }
 

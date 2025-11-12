@@ -15,12 +15,15 @@ Simple Page Saver is a full-featured web content extraction tool that:
 
 ### Chrome Extension
 - **Single Page Extraction** - One-click conversion of current page
-- **Selective Downloads** - Choose to download content, media links, external links, or all
+- **Screenshot Capture** - CDP-based full-page screenshots with infinite scroll detection
+- **Selective Downloads** - Choose to download content, media links, external links, screenshots, or all
 - **Job Tracking** - Visual job list with real-time progress that persists across popup closes
-- **Site Mapping** - Discover and map entire sites (0-3 levels deep)
+- **Pause/Resume** - Interrupt and continue long-running site mapping jobs
+- **Site Mapping** - Discover and map entire sites (0-3 levels deep) with parent-child tracking
 - **Batch Processing** - Extract multiple pages with progress tracking
 - **Link Categorization** - Automatic sorting (internal/external/media)
 - **ZIP Downloads** - Bundle multiple pages into single archive
+- **Warnings System** - Detailed warnings.txt file for issues encountered during extraction
 - **AI Toggle** - Control costs with on/off switch
 - **Custom AI Instructions** - 7 preset templates for common tasks
 - **Connection Management** - Automatic reconnection with retry logic and health monitoring
@@ -37,6 +40,25 @@ Simple Page Saver is a full-featured web content extraction tool that:
 - **Intelligent Fallback Chain** - AI → Trafilatura → html2text with 3 extraction modes
 - **Extraction Modes** - Balanced, Recall (more content), Precision (cleaner output)
 - **Standalone Executable** - Single .exe file distribution
+
+### Screenshot Capture (New in 2.2)
+- **Full-Page Screenshots** - Chrome DevTools Protocol (CDP) for capturing entire page beyond viewport
+- **Infinite Scroll Detection** - Automatic detection and warnings for dynamically loading pages
+- **Black & White Optimization** - Default B&W conversion reduces file size by 60%+ using true binary thresholding
+- **Preserve Color Option** - Optional full-color screenshots with checkbox control
+- **WebP Compression** - 30-40% smaller file sizes compared to JPEG
+- **Auto-Crop Protection** - Pages exceeding 16,384px height automatically cropped with warning
+- **Warnings System** - warnings.txt file includes all issues (infinite scroll, cropping, extraction errors)
+- **Flexible Download** - Screenshots bundled in ZIP or downloaded separately
+
+### Job Management & Persistence (New in 2.2)
+- **Pause/Resume** - Pause long-running site mapping jobs and resume later from exact position
+- **Dual Persistence** - Jobs saved to both IndexedDB (browser-side) and backend (server-side)
+- **Browser Restart Survival** - Jobs persist across browser restarts and tab closes
+- **View Progress** - Check discovered URLs and progress for paused jobs
+- **State Preservation** - Complete job state saved (discovered URLs, processing queue, parent-child relationships)
+- **Resume Continuation** - Seamlessly continue from saved state with all data intact
+- **Stop Control** - Stop jobs while preserving all discovered data
 
 ### Security & Privacy
 - API keys encrypted using cryptography library
@@ -124,28 +146,54 @@ SimplePageSaver.exe --help
    - ☑ Download page content (markdown)
    - ☐ Download media links (txt file)
    - ☐ Download external links (txt file)
+   - ☐ Include screenshot (full-page CDP capture)
+     - ☐ Preserve color (default: B&W for smaller file size)
    - ☐ Create ZIP file
 5. Choose extraction mode (Balanced/Recall/Precision)
 6. Click "Extract Current Page"
 7. Watch real-time progress in job tracker
 8. Files download automatically when complete
+   - If screenshot enabled: receives warnings.txt if issues detected
 
-**Extract Multiple Pages**:
+**Extract Page with Screenshot**:
+1. Navigate to any webpage
+2. Click extension icon
+3. Check "Include screenshot"
+4. Optional: Check "Preserve color" for full-color screenshot (larger file size)
+5. Select other options (content, media links, etc.)
+6. Click "Extract Current Page"
+7. Receive files:
+   - page_title.md (markdown content)
+   - screenshot_page-title_timestamp.webp (full-page screenshot)
+   - warnings.txt (if infinite scroll or other issues detected)
+   - All bundled in ZIP if selected
+
+**Extract Multiple Pages (Site Mapping)**:
 1. Navigate to a website
 2. Click extension icon
 3. Set crawl depth (0-3 levels)
 4. Click "Map Site"
-5. Select URLs to extract
-6. Choose "Download as ZIP"
-7. Click "Extract Selected Pages"
-8. Monitor progress in active jobs section
+5. Site mapping begins - discovers all URLs up to specified depth
+6. **Pause/Resume Controls**:
+   - Click "Pause" button to temporarily halt mapping
+   - Click "Resume" to continue from exact saved state
+   - Click "Stop" to halt permanently (preserves discovered data)
+   - Click "View Progress" to see all discovered URLs
+7. Jobs persist across browser restarts
+8. Select URLs to extract
+9. Choose "Download as ZIP"
+10. Click "Extract Selected Pages"
+11. Monitor progress in active jobs section
 
 **Job Tracking**:
 - View all active and recent jobs in popup
-- Color-coded status: 🟢 Completed, 🟡 Processing, 🔴 Failed, ⚪ Pending
+- Color-coded status: 🟢 Completed, 🟡 Processing, 🔴 Failed, ⚪ Pending, 🟠 Paused
 - Click any job to see details
-- Jobs persist across popup closes (stored on backend)
+- Jobs persist across popup closes and browser restarts (dual storage: IndexedDB + backend)
+- **Pause/Resume/Stop buttons** for active site mapping jobs
+- **View Progress button** for paused jobs to see discovered URLs
 - Auto-refresh every 5 seconds
+- Complete state preservation for resumed jobs
 
 **Custom AI Instructions**:
 1. Enable AI in extension
@@ -164,18 +212,24 @@ SimplePageSaver.exe --help
 ### Frontend: Chrome Extension (Manifest V3)
 ```
 extension/
-├── manifest.json          # Extension configuration
-├── popup.html/js          # User interface
-├── background.js          # Service worker (orchestration)
+├── manifest.json          # Extension configuration (includes debugger permission)
+├── popup.html/js          # User interface with screenshot controls
+├── background.js          # Service worker (orchestration, pause/resume)
 ├── content-script.js      # Page extraction
+├── screenshot-utils.js    # CDP-based screenshot capture
+├── warnings-tracker.js    # Warnings collection system
+├── job-storage.js         # IndexedDB persistence layer
 └── jszip.min.js          # ZIP file creation
 ```
 
 **Features**:
-- Popup UI for user interaction
-- Background service worker for tab management
+- Popup UI for user interaction with screenshot and pause/resume controls
+- Background service worker for tab management and job persistence
 - Content scripts for HTML extraction
-- Real-time progress tracking
+- Real-time progress tracking with pause/resume support
+- CDP integration for full-page screenshots
+- IndexedDB storage for job persistence across browser restarts
+- Warnings system for issue tracking
 
 ### Backend: Python FastAPI
 ```
@@ -313,6 +367,9 @@ POST /estimate-cost
 ```
 GET /jobs?status=processing&limit=50   # List jobs
 GET /jobs/{job_id}                     # Get job details
+POST /jobs/{job_id}/pause              # Pause a running job
+POST /jobs/{job_id}/resume             # Resume a paused job
+POST /jobs/{job_id}/stop               # Stop a job (preserves data)
 DELETE /jobs/{job_id}                  # Delete job
 ```
 
@@ -394,16 +451,19 @@ DELETE /jobs/{job_id}                  # Delete job
 ```
 simple-page-saver/
 ├── extension/                  # Chrome extension
-│   ├── manifest.json
-│   ├── popup.html/js
-│   ├── background.js          # Connection management & retry logic
-│   ├── content-script.js
-│   └── jszip.min.js
+│   ├── manifest.json          # Includes debugger permission for CDP
+│   ├── popup.html/js          # UI with screenshot and pause/resume controls
+│   ├── background.js          # Connection management, pause/resume, persistence
+│   ├── content-script.js      # Page extraction
+│   ├── screenshot-utils.js    # CDP screenshot capture with infinite scroll detection
+│   ├── warnings-tracker.js    # Warnings collection and formatting
+│   ├── job-storage.js         # IndexedDB wrapper for job persistence
+│   └── jszip.min.js          # ZIP file creation
 ├── backend/                    # Python backend
 │   ├── launcher.py            # Entry point (CLI)
 │   ├── gui.py                 # Management GUI
-│   ├── main.py                # FastAPI app with job endpoints
-│   ├── job_manager.py         # Job tracking and persistence
+│   ├── main.py                # FastAPI app with pause/resume endpoints
+│   ├── job_manager.py         # Job tracking with pause/resume support
 │   ├── settings_manager.py    # Encrypted settings
 │   ├── logging_config.py      # Logging system
 │   ├── preprocessing.py       # 3-tier HTML preprocessing
@@ -414,6 +474,7 @@ simple-page-saver/
 │   └── start_server.bat      # Server launcher
 ├── logs/                      # Server logs
 ├── README.md                  # This file
+├── CODE_REVIEW_FINDINGS.md   # Bug fixes documentation
 ├── BACKEND_GUI_GUIDE.md      # Detailed backend docs
 ├── TESTING.md                # Testing guide
 └── LAUNCHER_QUICKSTART.txt   # Quick reference
@@ -422,6 +483,7 @@ simple-page-saver/
 ## Documentation
 
 - **README.md** (this file) - Main overview
+- **CODE_REVIEW_FINDINGS.md** - Bug fixes and improvements log
 - **BACKEND_GUI_GUIDE.md** - Detailed backend documentation
 - **TESTING.md** - Testing procedures
 - **LAUNCHER_QUICKSTART.txt** - Command-line reference
@@ -482,12 +544,17 @@ All options work independently or together.
 ### Job Tracking & Persistence
 
 - **UUID-Based Jobs** - Every operation tracked with unique ID
-- **Persistent Storage** - Jobs survive popup closes and browser restarts
+- **Dual Persistence** - Jobs stored in both IndexedDB (browser) and backend (server)
+- **Browser Restart Survival** - Complete job state persists across browser restarts
 - **Real-Time Progress** - Current step, percentage, status message
-- **Status Indicators** - Visual color-coded status (pending/processing/completed/failed)
+- **Status Indicators** - Visual color-coded status (pending/processing/completed/failed/paused)
+- **Pause/Resume/Stop** - Full control over long-running site mapping jobs
+- **State Preservation** - Complete state saved: discovered URLs, processing queue, parent-child relationships
+- **Seamless Continuation** - Resume picks up exactly where paused, no data loss
+- **View Progress** - Check discovered URLs for paused jobs
 - **Auto-Refresh** - Jobs list updates every 5 seconds
 - **Click Details** - Click any job to see full information
-- **Backend Storage** - Jobs stored on server, accessible from any tab
+- **Accessible Anywhere** - Jobs accessible from any tab via backend storage
 
 ### Connection Management
 
@@ -549,8 +616,64 @@ MIT License - Free to use and modify
 
 ## Version
 
-**Current Version**: 2.1
-**Last Updated**: 2025-11-10
+**Current Version**: 2.2
+**Last Updated**: 2025-11-12
+
+### What's New in 2.2
+
+#### 📸 Screenshot Capture System
+- **CDP-Based Full-Page Screenshots** - Captures entire page beyond viewport using Chrome DevTools Protocol
+- **Infinite Scroll Detection** - Automatically detects dynamically loading content (MutationObserver + IntersectionObserver)
+- **Black & White Optimization** - Default B&W conversion reduces file size by 60%+ using true binary thresholding (luminosity method)
+- **Preserve Color Option** - Optional full-color screenshots with checkbox control
+- **WebP Compression** - 30-40% smaller file sizes compared to JPEG while maintaining quality
+- **Auto-Crop Protection** - Pages exceeding 16,384px height automatically cropped with warning
+- **warnings.txt File** - Comprehensive issue reporting (infinite scroll detection, cropping, extraction errors, link issues)
+- **Flexible Download** - Screenshots bundled in ZIP or downloaded separately
+- **Debugger Permission** - Added to manifest.json for CDP access
+
+#### ⏸️ Pause/Resume/Stop Controls
+- **Pause Site Mapping Jobs** - Temporarily halt long-running jobs without losing progress
+- **Resume from Saved State** - Continue exactly where paused with complete state restoration
+- **Stop Control** - Permanently halt jobs while preserving all discovered data
+- **View Progress** - Check discovered URLs and progress for paused jobs
+- **Pause/Resume/Stop Buttons** - Added to job cards in popup UI
+
+#### 💾 Dual Persistence System
+- **IndexedDB Storage** - Browser-side persistence (extension/job-storage.js)
+- **Backend Storage** - Server-side persistence (backend/job_manager.py)
+- **Browser Restart Survival** - Jobs persist across browser restarts and tab closes
+- **Complete State Preservation** - Saves discovered URLs, processing queue, parent-child relationships, progress
+- **Seamless State Restoration** - Resume loads complete state from IndexedDB
+- **Redundant Backup** - Dual storage ensures no data loss
+
+#### 🌳 Parent-Child URL Tracking
+- **Relationship Mapping** - Tracks which URL discovered which child URL
+- **Map Data Structure** - O(1) lookups for parent relationships
+- **Ready for Tree View** - Data infrastructure complete for hierarchical display
+- **Depth Tracking** - Each URL tagged with its discovery level
+
+#### 🔧 Bug Fixes (See CODE_REVIEW_FINDINGS.md)
+- ✅ Site mapping now actually pauses (while loop check added)
+- ✅ Parent-child relationships populated during discovery
+- ✅ Complete job state saved to IndexedDB (full persistence)
+- ✅ Resume continuation implemented (continueSiteMapping function)
+- ✅ Jobs saved to IndexedDB on creation
+- ✅ Screenshot filename sanitization fixed (fallback for empty titles)
+- ✅ API endpoint consistency improvements
+
+#### 📋 New Files Added
+- `extension/screenshot-utils.js` - CDP screenshot capture with infinite scroll detection
+- `extension/warnings-tracker.js` - Warnings collection and formatting system
+- `extension/job-storage.js` - IndexedDB wrapper for job persistence
+- `CODE_REVIEW_FINDINGS.md` - Comprehensive bug fixes documentation
+
+#### 🔌 New API Endpoints
+- `POST /jobs/{job_id}/pause` - Pause a running job
+- `POST /jobs/{job_id}/resume` - Resume a paused job
+- `POST /jobs/{job_id}/stop` - Stop a job while preserving data
+
+---
 
 ### What's New in 2.1
 - ✨ Job tracking system with persistence across popup closes

@@ -388,6 +388,71 @@
             background: #1976D2;
         }
 
+        .job-pause {
+            padding: 2px 8px;
+            font-size: 11px;
+            background: #FF9800;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .job-pause:hover {
+            background: #F57C00;
+        }
+
+        .job-resume {
+            padding: 2px 8px;
+            font-size: 11px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .job-resume:hover {
+            background: #45a049;
+        }
+
+        .job-stop {
+            padding: 2px 8px;
+            font-size: 11px;
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .job-stop:hover {
+            background: #d32f2f;
+        }
+
+        .job-view-progress {
+            padding: 2px 8px;
+            font-size: 11px;
+            background: #9C27B0;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .job-view-progress:hover {
+            background: #7B1FA2;
+        }
+
+        .job-status.paused {
+            background: #fff3e0;
+            color: #e65100;
+        }
+
         .job-remove {
             background: none;
             border: none;
@@ -526,6 +591,14 @@
             <label style="display: block; margin-bottom: 4px;">
                 <input type="checkbox" id="download-external-links">
                 <span>Download external links</span>
+            </label>
+            <label style="display: block; margin-bottom: 4px;">
+                <input type="checkbox" id="include-screenshot">
+                <span>Include screenshot</span>
+            </label>
+            <label style="display: block; margin-bottom: 8px; margin-left: 20px;" id="preserve-color-container" title="By default, screenshots are converted to black & white to reduce file size">
+                <input type="checkbox" id="preserve-color" disabled>
+                <span style="font-size: 11px; color: #666;">Preserve color (larger file size)</span>
             </label>
             <label style="display: block; margin-bottom: 8px;">
                 <input type="checkbox" id="single-page-zip">
