@@ -39,6 +39,7 @@ const connectionState = {
 const siteMappingState = {
     currentJobId: null,
     isPaused: false,
+    isCompleting: false,  // New: flag to complete gracefully after current URL
     discoveredUrls: new Set(),
     processedUrls: new Set(),
     urlsToProcess: [],
@@ -253,6 +254,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .then(response => sendResponse(response))
             .catch(error => sendResponse({ success: false, error: error.message }));
         return true;
+    } else if (request.action === 'COMPLETE_NOW_JOB') {
+        handleCompleteNowJob(request.jobId)
+            .then(response => sendResponse(response))
+            .catch(error => sendResponse({ success: false, error: error.message }));
+        return true;
     }
 });
 
@@ -338,14 +344,20 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
         console.log('[Extract] Waiting for dynamic content...');
         await sleep(DELAY_AFTER_LOAD);
 
-        // Trigger print dialog if PDF printing is requested
+        // Extract HTML from the page first (needed for title)
+        console.log('[Extract] Extracting HTML...');
+        const pageData = await extractPageData(tab.id);
+        console.log('[Extract] HTML extracted, size:', pageData.html.length, 'chars');
+
+        // Generate PDF directly if requested (using Chrome DevTools Protocol)
         if (downloadOptions.printToPdf) {
             try {
-                console.log('[Extract] Opening print dialog with custom settings...');
+                console.log('[Extract] Generating PDF using Chrome DevTools Protocol...');
+
+                // Inject print styles before PDF generation
                 await chrome.scripting.executeScript({
                     target: { tabId: tab.id },
                     func: () => {
-                        // Inject print styles
                         const style = document.createElement('style');
                         style.id = 'simple-page-saver-print-styles';
                         style.textContent = `
@@ -358,7 +370,7 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
                                     -webkit-print-color-adjust: exact !important;
                                     print-color-adjust: exact !important;
                                 }
-                                /* Disable background graphics by default */
+                                /* Disable background graphics */
                                 * {
                                     background: transparent !important;
                                     background-image: none !important;
@@ -366,31 +378,46 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
                             }
                         `;
                         document.head.appendChild(style);
-
-                        // Open print dialog
-                        window.print();
-
-                        // Clean up after print dialog closes
-                        setTimeout(() => {
-                            const styleEl = document.getElementById('simple-page-saver-print-styles');
-                            if (styleEl) styleEl.remove();
-                        }, 1000);
                     }
                 });
-                console.log('[Extract] Print dialog opened with A0 size, backgrounds disabled');
 
-                // Add informational note
-                warnings.addGeneric('print', 'Print dialog opened with A0 paper size and backgrounds disabled. Select "Save as PDF" to save. Note: "2 pages per sheet" must be manually configured in print settings.');
+                // Generate PDF using Chrome DevTools Protocol
+                const pdfData = await generatePdfUsingCDP(tab.id, pageData.title);
+
+                if (pdfData) {
+                    console.log('[Extract] PDF generated successfully, size:', pdfData.byteLength, 'bytes');
+
+                    // Download the PDF
+                    const blob = new Blob([pdfData], { type: 'application/pdf' });
+                    const pdfUrl = URL.createObjectURL(blob);
+                    const filename = sanitizeFilename(pageData.title || 'page') + '.pdf';
+
+                    await chrome.downloads.download({
+                        url: pdfUrl,
+                        filename: filename,
+                        saveAs: false
+                    });
+
+                    console.log('[Extract] PDF downloaded:', filename);
+                    warnings.addGeneric('print', `PDF saved as ${filename} (A0 size, no backgrounds)`);
+                } else {
+                    throw new Error('PDF generation returned no data');
+                }
+
+                // Clean up styles
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    func: () => {
+                        const styleEl = document.getElementById('simple-page-saver-print-styles');
+                        if (styleEl) styleEl.remove();
+                    }
+                });
+
             } catch (error) {
-                console.error('[Extract] Failed to open print dialog:', error);
-                warnings.addGeneric('print', `Failed to open print dialog: ${error.message}`);
+                console.error('[Extract] Failed to generate PDF:', error);
+                warnings.addGeneric('print', `Failed to generate PDF: ${error.message}`);
             }
         }
-
-        // Extract HTML from the page
-        console.log('[Extract] Extracting HTML...');
-        const pageData = await extractPageData(tab.id);
-        console.log('[Extract] HTML extracted, size:', pageData.html.length, 'chars');
 
         let result = null;
         let externalLinks = [];
@@ -650,17 +677,21 @@ async function handleMapSite(startUrl, depth) {
         siteMappingState.urlsToProcess = urlsToProcess;
         siteMappingState.urlDataList = urlDataList;
 
-        while (urlsToProcess.length > 0 && !siteMappingState.isPaused) {
+        while (urlsToProcess.length > 0 && !siteMappingState.isPaused && !siteMappingState.isCompleting) {
             const { url, level, parent } = urlsToProcess.shift();
 
             if (processedUrls.has(url) || level > depth) {
                 continue;
             }
 
-            // Check for pause again after async operations (Bug fix #1)
+            // Check for pause/complete again after async operations
             if (siteMappingState.isPaused) {
                 console.log('[Map] Job paused by user');
                 break;
+            }
+
+            if (siteMappingState.isCompleting) {
+                console.log('[Map] Completing job now - will finish after this URL');
             }
 
             processedUrls.add(url);
@@ -758,6 +789,13 @@ async function handleMapSite(startUrl, depth) {
             urlDataList.unshift({ url: startUrl, type: 'internal', level: 0, parent: null });
         }
 
+        // Handle completing state (Complete Now was clicked)
+        if (siteMappingState.isCompleting) {
+            console.log('[Map] Completing job early at user request...');
+            siteMappingState.isCompleting = false; // Reset flag
+            // Continue to complete the job below (don't return early)
+        }
+
         // Handle paused state (Bug fix #3)
         if (siteMappingState.isPaused) {
             console.log('[Map] Saving paused job state to IndexedDB...');
@@ -785,9 +823,11 @@ async function handleMapSite(startUrl, depth) {
                 job.result = {
                     discovered_urls: urlDataList.map(u => u.url),
                     total_discovered: discoveredUrls.size,
-                    urlDataList: urlDataList
+                    urlDataList: urlDataList,
+                    saved_state: jobState  // Also store in result for consistency
                 };
                 await jobStorage.saveJob(job);
+                console.log('[Map] Saved state to IndexedDB with', urlsToProcess.length, 'URLs remaining');
             }
 
             showNotification('Mapping Paused', `Paused at ${discoveredUrls.size} URLs discovered`);
@@ -936,10 +976,18 @@ async function handleResumeJob(jobId) {
 
         console.log('[Job] Job resumed successfully');
 
-        // Continue site mapping from saved state (Bug fix #2)
-        if (job.type === 'site_map' && job.params.saved_state) {
+        // Continue site mapping from saved state (Bug fix: check both params and result)
+        const savedState = (job.params && job.params.saved_state) || (job.result && job.result.saved_state);
+
+        if (job.type === 'site_map' && savedState) {
             console.log('[Job] Continuing site mapping from saved state...');
-            await continueSiteMapping(jobId, job.params.saved_state);
+            console.log('[Job] URLs to process:', savedState.urlsToProcess?.length || 0);
+            await continueSiteMapping(jobId, savedState);
+        } else {
+            console.warn('[Job] No saved_state found for job resume');
+            console.warn('[Job] Job type:', job.type);
+            console.warn('[Job] Has params.saved_state:', !!(job.params && job.params.saved_state));
+            console.warn('[Job] Has result.saved_state:', !!(job.result && job.result.saved_state));
         }
 
         return { success: true, message: 'Job resumed', job: result.job };
@@ -1102,9 +1150,11 @@ async function continueSiteMapping(jobId, savedState) {
                 job.result = {
                     discovered_urls: urlDataList.map(u => u.url),
                     total_discovered: discoveredUrls.size,
-                    urlDataList: urlDataList
+                    urlDataList: urlDataList,
+                    saved_state: jobState  // Also store in result for consistency
                 };
                 await jobStorage.saveJob(job);
+                console.log('[Map] Saved state to IndexedDB with', urlsToProcess.length, 'URLs remaining');
             }
 
             showNotification('Mapping Paused', `Paused at ${discoveredUrls.size} URLs discovered`);
@@ -1190,6 +1240,48 @@ async function handleStopJob(jobId) {
 
     } catch (error) {
         console.error('[Job] Failed to stop job:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// Complete a job now (gracefully finish current URL and complete)
+async function handleCompleteNowJob(jobId) {
+    try {
+        console.log('[Job] Completing job now:', jobId);
+
+        // Set the completing flag to finish after current URL
+        if (siteMappingState.currentJobId === jobId) {
+            siteMappingState.isCompleting = true;
+            console.log('[Job] Set isCompleting flag - will complete after current URL');
+            showNotification('Completing Job', 'Will finish after current URL...');
+        } else {
+            // Job might be on backend only, not actively mapping
+            console.warn('[Job] Job is not actively running in background worker');
+
+            // Mark as completed on backend
+            const storage = await chrome.storage.local.get(['apiEndpoint']);
+            const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+
+            try {
+                const response = await fetch(`${apiUrl}/jobs/${jobId}/complete`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showNotification('Job Completed', 'Job marked as complete');
+                    return { success: true, message: 'Job completed', job: result.job };
+                }
+            } catch (backendError) {
+                console.warn('[Job] Could not complete on backend:', backendError.message);
+            }
+        }
+
+        // The actual completion will happen in the mapping loop when it checks isCompleting
+        return { success: true, message: 'Job will complete after current URL' };
+
+    } catch (error) {
+        console.error('[Job] Failed to complete job:', error);
         return { success: false, error: error.message };
     }
 }
@@ -1639,6 +1731,68 @@ function waitForTabLoad(tabId) {
 // Sleep utility
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Generate PDF using Chrome DevTools Protocol
+async function generatePdfUsingCDP(tabId, title) {
+    let debuggee = { tabId: tabId };
+
+    try {
+        // Attach debugger
+        console.log('[CDP] Attaching debugger to tab:', tabId);
+        await chrome.debugger.attach(debuggee, '1.3');
+
+        // A0 paper dimensions in inches (33.1 x 46.8 inches)
+        // Chrome uses inches for paper dimensions
+        const pdfOptions = {
+            printBackground: false,        // Don't print backgrounds
+            paperWidth: 33.1,             // A0 width in inches
+            paperHeight: 46.8,            // A0 height in inches
+            marginTop: 0.2,               // 0.5cm ≈ 0.2 inches
+            marginBottom: 0.2,
+            marginLeft: 0.2,
+            marginRight: 0.2,
+            scale: 1.0,                   // 100% scale
+            displayHeaderFooter: false,   // No header/footer
+            preferCSSPageSize: true,      // Use CSS @page size if specified
+            generateTaggedPDF: false,     // Faster generation
+            transferMode: 'ReturnAsBase64'
+        };
+
+        console.log('[CDP] Sending Page.printToPDF command with options:', pdfOptions);
+
+        // Send printToPDF command
+        const result = await chrome.debugger.sendCommand(
+            debuggee,
+            'Page.printToPDF',
+            pdfOptions
+        );
+
+        if (result && result.data) {
+            console.log('[CDP] PDF data received, converting from base64...');
+            // Convert base64 to Uint8Array
+            const binaryString = atob(result.data);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        } else {
+            throw new Error('No PDF data returned from Chrome DevTools Protocol');
+        }
+
+    } catch (error) {
+        console.error('[CDP] Error generating PDF:', error);
+        throw error;
+    } finally {
+        // Always detach debugger
+        try {
+            await chrome.debugger.detach(debuggee);
+            console.log('[CDP] Debugger detached');
+        } catch (detachError) {
+            console.warn('[CDP] Failed to detach debugger:', detachError);
+        }
+    }
 }
 
 // Send progress update to popup

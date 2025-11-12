@@ -1058,6 +1058,10 @@ async function updateConnectionStatus() {
             const statusText = document.getElementById('connection-text');
             const statusDot = statusDiv.querySelector('.status-dot');
 
+            // Get EXTENSION's AI setting (not backend's capability)
+            const aiStorage = await chrome.storage.local.get(['enableAI']);
+            const extensionAIEnabled = aiStorage.enableAI ?? false;
+
             if (state.isConnected) {
                 // Backend is connected
                 if (state.isBusy) {
@@ -1076,8 +1080,13 @@ async function updateConnectionStatus() {
                     statusDot.className = 'status-dot green';
 
                     let text = '✓ Backend connected';
-                    if (state.aiEnabled) {
+                    // Show EXTENSION's AI setting, not backend's capability
+                    if (extensionAIEnabled) {
                         text += ' (AI enabled)';
+                        // Warn if extension wants AI but backend can't provide it
+                        if (!state.aiEnabled) {
+                            text += ' ⚠️ No API key';
+                        }
                     } else {
                         text += ' (Fallback mode)';
                     }
@@ -1227,6 +1236,9 @@ function createJobElement(job) {
     // Show stop button for processing jobs
     const showStopButton = job.status === 'processing';
 
+    // Show complete now button for processing site_map jobs
+    const showCompleteNowButton = job.status === 'processing' && job.type === 'site_map';
+
     div.innerHTML = `
         <div class="job-header">
             <div class="job-title" title="${title}">${truncate(title, 35)}</div>
@@ -1235,6 +1247,7 @@ function createJobElement(job) {
                 ${showLoadButton ? '<button class="job-load" title="Load discovered URLs">Load</button>' : ''}
                 ${showResumeButton ? '<button class="job-resume" title="Resume job">Resume</button>' : ''}
                 ${showResumeButton ? '<button class="job-view-progress" title="View progress">View</button>' : ''}
+                ${showCompleteNowButton ? '<button class="job-complete" title="Complete after current URL">Complete Now</button>' : ''}
                 ${showPauseButton ? '<button class="job-pause" title="Pause job">Pause</button>' : ''}
                 ${showStopButton ? '<button class="job-stop" title="Stop job">Stop</button>' : ''}
                 ${showRemoveButton ? '<button class="job-remove" title="Remove from list">×</button>' : ''}
@@ -1256,6 +1269,7 @@ function createJobElement(job) {
                                e.target.classList.contains('job-pause') ||
                                e.target.classList.contains('job-resume') ||
                                e.target.classList.contains('job-stop') ||
+                               e.target.classList.contains('job-complete') ||
                                e.target.classList.contains('job-view-progress');
         if (!isActionButton) {
             handleJobClick(job);
@@ -1310,6 +1324,17 @@ function createJobElement(job) {
             stopBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 await stopJob(job.id);
+            });
+        }
+    }
+
+    // Add click handler for complete now button
+    if (showCompleteNowButton) {
+        const completeBtn = div.querySelector('.job-complete');
+        if (completeBtn) {
+            completeBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await completeNowJob(job.id);
             });
         }
     }
@@ -1588,6 +1613,28 @@ async function stopJob(jobId) {
     } catch (error) {
         console.error('[Jobs] Error stopping job:', error);
         showStatus(`Failed to stop job: ${error.message}`, 'error');
+    }
+}
+
+// Complete a job now (finish current URL and complete)
+async function completeNowJob(jobId) {
+    console.log('[Jobs] Completing job now:', jobId);
+
+    try {
+        const response = await chrome.runtime.sendMessage({
+            action: 'COMPLETE_NOW_JOB',
+            jobId: jobId
+        });
+
+        if (response && response.success) {
+            showStatus('Job will complete after current URL', 'success');
+            await loadJobs(); // Refresh list
+        } else {
+            throw new Error(response.error || 'Failed to complete job');
+        }
+    } catch (error) {
+        console.error('[Jobs] Error completing job:', error);
+        showStatus(`Failed to complete job: ${error.message}`, 'error');
     }
 }
 
