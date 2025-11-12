@@ -806,9 +806,11 @@ async function handleMapSite(startUrl, depth) {
                 job.result = {
                     discovered_urls: urlDataList.map(u => u.url),
                     total_discovered: discoveredUrls.size,
-                    urlDataList: urlDataList
+                    urlDataList: urlDataList,
+                    saved_state: jobState  // Also store in result for consistency
                 };
                 await jobStorage.saveJob(job);
+                console.log('[Map] Saved state to IndexedDB with', urlsToProcess.length, 'URLs remaining');
             }
 
             showNotification('Mapping Paused', `Paused at ${discoveredUrls.size} URLs discovered`);
