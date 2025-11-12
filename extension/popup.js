@@ -1146,12 +1146,17 @@ async function handleJobClick(job) {
 
 // Load job context (restore job data to UI)
 async function loadJobContext(job) {
-    console.log('[Jobs] Loading job context:', job.id);
+    console.log('[Jobs] Loading job context:', job);
+    console.log('[Jobs] Job type:', job.type);
+    console.log('[Jobs] Job status:', job.status);
+    console.log('[Jobs] Job result:', job.result);
 
     try {
         if (job.type === 'site_map' && job.status === 'completed' && job.result) {
             // Load discovered URLs into the site mapping section
             const urlDataList = job.result.urlDataList || [];
+            console.log('[Jobs] urlDataList length:', urlDataList.length);
+            console.log('[Jobs] urlDataList sample:', urlDataList.slice(0, 3));
 
             if (urlDataList.length > 0) {
                 // Store the URLs globally
@@ -1169,6 +1174,7 @@ async function loadJobContext(job) {
 
                 showStatus(`Loaded ${urlDataList.length} URLs from site mapping job`, 'success');
             } else {
+                console.warn('[Jobs] No URLs found. job.result:', job.result);
                 showStatus('No URLs found in job result', 'warning');
             }
         } else if (job.type === 'single_page') {
