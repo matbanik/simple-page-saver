@@ -351,6 +351,8 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
         console.log('[Extract] HTML extracted, size:', pageData.html.length, 'chars');
 
         // Generate PDF directly if requested (using Chrome DevTools Protocol)
+        let pdfDataUrl = null;
+        let pdfFilename = null;
         if (downloadOptions.printToPdf) {
             try {
                 console.log('[Extract] Generating PDF using Chrome DevTools Protocol...');
@@ -388,29 +390,18 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
                 if (pdfData) {
                     console.log('[Extract] PDF generated successfully, size:', pdfData.byteLength, 'bytes');
 
-                    // Download the PDF using data URL (works in service workers, unlike URL.createObjectURL)
+                    // Convert PDF to data URL for inclusion in ZIP or direct download
                     const blob = new Blob([pdfData], { type: 'application/pdf' });
                     const reader = new FileReader();
-                    const filename = sanitizeFilename(pageData.title || 'page') + '.pdf';
+                    pdfFilename = sanitizeFilename(pageData.title || 'page') + '.pdf';
 
-                    await new Promise((resolve, reject) => {
-                        reader.onloadend = async () => {
-                            try {
-                                await chrome.downloads.download({
-                                    url: reader.result,
-                                    filename: filename,
-                                    saveAs: false
-                                });
-                                console.log('[Extract] PDF downloaded:', filename);
-                                warnings.addGeneric('print', `PDF saved as ${filename} (A0 size, no backgrounds)`);
-                                resolve();
-                            } catch (err) {
-                                reject(err);
-                            }
-                        };
+                    pdfDataUrl = await new Promise((resolve, reject) => {
+                        reader.onloadend = () => resolve(reader.result);
                         reader.onerror = reject;
                         reader.readAsDataURL(blob);
                     });
+
+                    console.log('[Extract] PDF prepared for download:', pdfFilename);
                 } else {
                     throw new Error('PDF generation returned no data');
                 }
@@ -468,6 +459,15 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
 
         // Prepare files for download
         const filesToDownload = [];
+
+        // Add PDF if it was generated successfully
+        if (pdfDataUrl && pdfFilename) {
+            filesToDownload.push({
+                content: pdfDataUrl,
+                filename: pdfFilename,
+                isDataUrl: true
+            });
+        }
 
         if (downloadOptions.content && result && result.markdown) {
             filesToDownload.push({
