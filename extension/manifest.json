@@ -9,9 +9,7 @@
     "downloads",
     "storage",
     "activeTab",
-    "notifications",
-    "debugger",
-    "offscreen"
+    "notifications"
   ],
   "host_permissions": [
     "http://localhost/*",

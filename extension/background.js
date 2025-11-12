@@ -4,8 +4,7 @@
 // Import JSZip library for creating ZIP files
 importScripts('jszip.min.js');
 
-// Import screenshot and warnings utilities
-importScripts('screenshot-utils.js');
+// Import utilities
 importScripts('warnings-tracker.js');
 importScripts('job-storage.js');
 
