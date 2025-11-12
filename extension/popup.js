@@ -1005,7 +1005,14 @@ function createJobElement(job) {
     div.className = `job-item ${job.status}`;
     div.dataset.jobId = job.id;
 
-    const title = job.params.title || job.params.url || 'Unknown';
+    // Determine job title with fallbacks
+    let title = job.params?.title || job.params?.url || 'Unknown';
+
+    // Fallback for site_map jobs: generate title from start_url if available
+    if (title === 'Unknown' && job.type === 'site_map' && job.params?.start_url) {
+        title = `Site Map: ${job.params.start_url}`;
+    }
+
     const statusText = job.status.charAt(0).toUpperCase() + job.status.slice(1);
     const progress = job.progress || { current: 0, total: 0, message: '', percent: 0 };
 
@@ -1157,11 +1164,14 @@ async function loadJobContext(job) {
             let urlDataList = job.result.urlDataList || [];
             console.log('[Jobs] urlDataList length:', urlDataList.length);
             console.log('[Jobs] urlDataList sample:', urlDataList.slice(0, 3));
+            console.log('[Jobs] job.result keys:', Object.keys(job.result));
+            console.log('[Jobs] job.result.discovered_urls:', job.result.discovered_urls);
+            console.log('[Jobs] job.params:', job.params);
 
             // Fallback: if urlDataList is missing but discovered_urls exists, reconstruct basic data
             if (urlDataList.length === 0 && job.result.discovered_urls && job.result.discovered_urls.length > 0) {
                 console.log('[Jobs] urlDataList missing, reconstructing from discovered_urls');
-                const startUrl = job.params.start_url || job.result.discovered_urls[0];
+                const startUrl = job.params?.start_url || job.result.discovered_urls[0];
 
                 urlDataList = job.result.discovered_urls.map((url, index) => ({
                     url: url,
@@ -1171,9 +1181,20 @@ async function loadJobContext(job) {
                 }));
 
                 console.log('[Jobs] Reconstructed urlDataList:', urlDataList.length, 'items');
+                console.log('[Jobs] Reconstructed sample:', urlDataList.slice(0, 3));
+            } else {
+                console.warn('[Jobs] Fallback not triggered. Checks:');
+                console.warn('  - urlDataList.length === 0:', urlDataList.length === 0);
+                console.warn('  - job.result.discovered_urls exists:', !!job.result.discovered_urls);
+                console.warn('  - job.result.discovered_urls.length:', job.result.discovered_urls?.length);
             }
 
             if (urlDataList.length > 0) {
+                // Set URL input field and dropdown to Map Site mode
+                const startUrl = job.params?.start_url || urlDataList[0].url;
+                document.getElementById('manual-url-input').value = startUrl;
+                document.getElementById('url-action-type').value = 'map';
+
                 // Store the URLs globally
                 discoveredUrls = urlDataList;
 
