@@ -243,20 +243,20 @@ class ServerGUI:
 
         self.log_message("Settings loaded successfully")
 
-    def save_settings(self):
+    def save_settings(self, show_success_message=True):
         """Save settings to settings manager"""
         try:
             # Validate port
             port = int(self.port_var.get())
             if port < 1024 or port > 65535:
                 messagebox.showerror("Error", "Port must be between 1024 and 65535")
-                return
+                return False
 
             # Validate max tokens
             max_tokens = int(self.max_tokens_var.get())
             if max_tokens < 1000:
                 messagebox.showerror("Error", "Max tokens must be at least 1000")
-                return
+                return False
 
             # Save settings
             self.settings_manager.set('server_port', port)
@@ -272,10 +272,15 @@ class ServerGUI:
                 self.log_message("WARNING: Logging DISABLED - no log files will be created")
             if self.diagnostic_mode_var.get():
                 self.log_message("WARNING: Diagnostic mode enabled - detailed logging active")
-            messagebox.showinfo("Success", "Settings saved successfully!")
+
+            if show_success_message:
+                messagebox.showinfo("Success", "Settings saved successfully!")
+
+            return True
 
         except ValueError as e:
             messagebox.showerror("Error", f"Invalid input: {str(e)}")
+            return False
 
     def log_message(self, message):
         """Add message to log output"""
@@ -318,8 +323,9 @@ class ServerGUI:
     def start_server(self):
         """Start the backend server"""
         try:
-            # Save settings first
-            self.save_settings()
+            # Save settings first (without showing success message)
+            if not self.save_settings(show_success_message=False):
+                return  # Settings validation failed, abort server start
 
             port = int(self.port_var.get())
 
