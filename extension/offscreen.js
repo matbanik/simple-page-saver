@@ -41,11 +41,14 @@ async function processScreenshot(dataUrl, preserveColor, format, quality) {
 
         img.onload = () => {
             try {
-                // Create canvas
+                // Create canvas with natural (intrinsic) image dimensions
+                // Use naturalWidth/naturalHeight instead of width/height to avoid display scaling issues
                 const canvas = document.getElementById('canvas');
-                canvas.width = img.width;
-                canvas.height = img.height;
+                canvas.width = img.naturalWidth;
+                canvas.height = img.naturalHeight;
                 const ctx = canvas.getContext('2d');
+
+                console.log(`[Offscreen] Canvas size: ${canvas.width}x${canvas.height}px`);
 
                 // Draw original image
                 ctx.drawImage(img, 0, 0);

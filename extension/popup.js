@@ -1151,50 +1151,23 @@ async function loadJobContext(job) {
     try {
         if (job.type === 'site_map' && job.status === 'completed' && job.result) {
             // Load discovered URLs into the site mapping section
-            const discoveredUrls = job.result.discovered_urls || [];
+            const urlDataList = job.result.urlDataList || [];
 
-            // Switch to Advanced Options tab
-            const advancedTab = document.getElementById('tab-advanced');
-            const advancedSection = document.getElementById('advanced-section');
+            if (urlDataList.length > 0) {
+                // Store the URLs globally
+                discoveredUrls = urlDataList;
 
-            if (advancedTab && advancedSection) {
-                // Remove active class from all tabs
-                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.section').forEach(s => s.style.display = 'none');
+                // Display URLs in tree view
+                displayUrls(urlDataList);
 
-                // Activate advanced tab
-                advancedTab.classList.add('active');
-                advancedSection.style.display = 'block';
-            }
+                // Show URL list and extraction controls
+                document.getElementById('url-list').classList.add('show');
+                document.getElementById('extraction-controls').style.display = 'block';
+                document.getElementById('search-box').style.display = 'block';
+                document.getElementById('link-filters').style.display = 'flex';
+                document.getElementById('tree-controls').style.display = 'flex';
 
-            // Populate the discovered URLs list
-            const urlsList = document.getElementById('discovered-urls-list');
-            if (urlsList && discoveredUrls.length > 0) {
-                urlsList.innerHTML = '';
-
-                discoveredUrls.forEach(url => {
-                    const label = document.createElement('label');
-                    label.className = 'url-item';
-                    label.innerHTML = `
-                        <input type="checkbox" value="${url}" checked>
-                        <span>${url}</span>
-                    `;
-                    urlsList.appendChild(label);
-                });
-
-                // Show the discovered URLs section
-                document.getElementById('discovered-urls').style.display = 'block';
-
-                // Update URL input with start URL if available
-                const startUrl = job.params.start_url;
-                if (startUrl) {
-                    const urlInput = document.getElementById('map-url');
-                    if (urlInput) {
-                        urlInput.value = startUrl;
-                    }
-                }
-
-                showStatus(`Loaded ${discoveredUrls.length} URLs from site mapping job`, 'success');
+                showStatus(`Loaded ${urlDataList.length} URLs from site mapping job`, 'success');
             } else {
                 showStatus('No URLs found in job result', 'warning');
             }
@@ -1256,7 +1229,7 @@ async function removeJob(jobId) {
         }
 
         // Refresh jobs list from backend
-        await loadActiveJobs();
+        await loadJobs();
 
         showStatus('Job removed', 'info');
     } catch (error) {
@@ -1394,7 +1367,7 @@ async function clearCompletedJobs() {
         await Promise.all(deletePromises);
 
         // Refresh jobs list from backend
-        await loadActiveJobs();
+        await loadJobs();
 
         showStatus('Completed jobs cleared', 'info');
     } catch (error) {
