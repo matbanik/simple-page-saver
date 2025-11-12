@@ -10,7 +10,8 @@
     "storage",
     "activeTab",
     "notifications",
-    "debugger"
+    "debugger",
+    "offscreen"
   ],
   "host_permissions": [
     "http://localhost/*",

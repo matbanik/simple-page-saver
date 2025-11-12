@@ -718,39 +718,47 @@ async function handlePauseJob(jobId) {
             siteMappingState.isPaused = true;
         }
 
-        // Update backend
+        // Update backend (if job exists there)
         const storage = await chrome.storage.local.get(['apiEndpoint']);
         const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
 
-        const response = await fetch(`${apiUrl}/jobs/${jobId}/pause`, {
-            method: 'POST'
-        });
+        let backendJob = null;
+        try {
+            const response = await fetch(`${apiUrl}/jobs/${jobId}/pause`, {
+                method: 'POST'
+            });
 
-        if (!response.ok) {
-            throw new Error(`Failed to pause job: ${response.statusText}`);
+            if (response.ok) {
+                const result = await response.json();
+                backendJob = result.job;
+            } else if (response.status === 404) {
+                // Job doesn't exist on backend (maybe backend restarted)
+                console.warn('[Job] Job not found on backend, updating IndexedDB only');
+            } else {
+                console.warn('[Job] Backend pause failed:', response.statusText);
+            }
+        } catch (fetchError) {
+            // Backend might be down, continue with local update
+            console.warn('[Job] Failed to pause job on backend:', fetchError.message);
         }
-
-        const result = await response.json();
 
         // Save complete job to IndexedDB (Bug fix #3)
         const job = await jobStorage.getJob(jobId);
         if (job) {
             // Update with latest from backend
             job.status = 'paused';
-            if (result.job) {
-                job.progress = result.job.progress || job.progress;
-                job.result = result.job.result || job.result;
+            if (backendJob) {
+                job.progress = backendJob.progress || job.progress;
+                job.result = backendJob.result || job.result;
             }
             await jobStorage.saveJob(job);
-        } else {
+        } else if (backendJob) {
             // If not in IndexedDB, save the one from backend
-            if (result.job) {
-                await jobStorage.saveJob(result.job);
-            }
+            await jobStorage.saveJob(backendJob);
         }
 
         console.log('[Job] Job paused successfully and saved to IndexedDB');
-        return { success: true, message: 'Job paused', job: result.job };
+        return { success: true, message: 'Job paused', job: backendJob };
 
     } catch (error) {
         console.error('[Job] Failed to pause job:', error);
@@ -985,25 +993,35 @@ async function handleStopJob(jobId) {
             siteMappingState.currentJobId = null;
         }
 
-        // Update backend
+        // Update backend (if job exists there)
         const storage = await chrome.storage.local.get(['apiEndpoint']);
         const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
 
-        const response = await fetch(`${apiUrl}/jobs/${jobId}/stop`, {
-            method: 'POST'
-        });
+        let backendJob = null;
+        try {
+            const response = await fetch(`${apiUrl}/jobs/${jobId}/stop`, {
+                method: 'POST'
+            });
 
-        if (!response.ok) {
-            throw new Error(`Failed to stop job: ${response.statusText}`);
+            if (response.ok) {
+                const result = await response.json();
+                backendJob = result.job;
+            } else if (response.status === 404) {
+                // Job doesn't exist on backend (maybe backend restarted)
+                console.warn('[Job] Job not found on backend, updating IndexedDB only');
+            } else {
+                console.warn('[Job] Backend stop failed:', response.statusText);
+            }
+        } catch (fetchError) {
+            // Backend might be down, continue with local update
+            console.warn('[Job] Failed to stop job on backend:', fetchError.message);
         }
 
-        const result = await response.json();
-
-        // Save to IndexedDB (stopped jobs are paused)
+        // Always update IndexedDB (stopped jobs are paused)
         await jobStorage.updateJobStatus(jobId, 'paused');
 
         console.log('[Job] Job stopped successfully');
-        return { success: true, message: 'Job stopped. Discovered data preserved.', job: result.job };
+        return { success: true, message: 'Job stopped. Discovered data preserved.', job: backendJob };
 
     } catch (error) {
         console.error('[Job] Failed to stop job:', error);

@@ -60,19 +60,32 @@ class JobStorage {
     async saveJob(job) {
         await this.ensureInit();
 
+        // Normalize job object - ensure it has 'id' field (IndexedDB key path)
+        // Backend returns 'job_id', so we need to normalize
+        const normalizedJob = {
+            ...job,
+            id: job.id || job.job_id  // Use 'id' if present, otherwise use 'job_id'
+        };
+
+        // Ensure we have an id
+        if (!normalizedJob.id) {
+            console.error('[JobStorage] Job object missing both id and job_id fields:', job);
+            throw new Error('Job object must have either id or job_id field');
+        }
+
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction(['jobs'], 'readwrite');
             const objectStore = transaction.objectStore('jobs');
 
-            const request = objectStore.put(job);
+            const request = objectStore.put(normalizedJob);
 
             request.onsuccess = () => {
-                console.log(`[JobStorage] Job saved: ${job.id}`);
+                console.log(`[JobStorage] Job saved: ${normalizedJob.id}`);
                 resolve();
             };
 
             request.onerror = () => {
-                console.error(`[JobStorage] Failed to save job ${job.id}:`, request.error);
+                console.error(`[JobStorage] Failed to save job ${normalizedJob.id}:`, request.error);
                 reject(request.error);
             };
         });
