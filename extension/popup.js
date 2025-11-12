@@ -49,9 +49,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('toggle-view').addEventListener('click', toggleViewMode);
 
     // Load view mode preference
-    const storage = await chrome.storage.local.get(['viewMode']);
-    if (storage.viewMode) {
-        currentViewMode = storage.viewMode;
+    const viewModeStorage = await chrome.storage.local.get(['viewMode']);
+    if (viewModeStorage.viewMode) {
+        currentViewMode = viewModeStorage.viewMode;
     }
 
     // Listen for progress updates
@@ -116,13 +116,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // Load saved custom prompt
-    const storage = await chrome.storage.local.get(['customPrompt']);
+    const promptStorage = await chrome.storage.local.get(['customPrompt']);
     const customPromptTextarea = document.getElementById('custom-prompt');
     const promptPresetSelect = document.getElementById('prompt-presets');
 
-    if (storage.customPrompt) {
+    if (promptStorage.customPrompt) {
         // There's a saved custom prompt - show textarea and set to "custom" mode
-        customPromptTextarea.value = storage.customPrompt;
+        customPromptTextarea.value = promptStorage.customPrompt;
         customPromptTextarea.style.display = 'block';
         promptPresetSelect.value = 'custom';
         console.log('[Popup] Loaded saved custom prompt');
