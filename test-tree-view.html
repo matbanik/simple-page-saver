@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tree View Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        #url-list {
+            max-height: 600px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            padding: 8px;
+            background: white;
+        }
+
+        /* Tree View Styles */
+        .tree-node {
+            margin-bottom: 2px;
+        }
+
+        .tree-node-content {
+            display: flex;
+            align-items: center;
+            padding: 6px;
+            background: #f9f9f9;
+            border-radius: 3px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .tree-node-content:hover {
+            background: #e8e8e8;
+        }
+
+        .tree-expand-icon {
+            width: 16px;
+            height: 16px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            user-select: none;
+            font-size: 10px;
+            color: #666;
+            flex-shrink: 0;
+        }
+
+        .tree-expand-icon:hover {
+            color: #333;
+        }
+
+        .tree-expand-icon.empty {
+            opacity: 0;
+            cursor: default;
+        }
+
+        .tree-node-checkbox {
+            margin-right: 8px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .tree-node-label {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            margin-right: 8px;
+        }
+
+        .tree-node-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            flex-shrink: 0;
+        }
+
+        .badge-internal {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .badge-external {
+            background: #fff3e0;
+            color: #e65100;
+        }
+
+        .badge-media {
+            background: #f3e5f5;
+            color: #7b1fa2;
+        }
+
+        .tree-children {
+            margin-left: 20px;
+            border-left: 1px solid #ddd;
+            padding-left: 8px;
+            display: none;
+        }
+
+        .tree-children.expanded {
+            display: block;
+        }
+
+        button {
+            margin: 10px 5px;
+            padding: 8px 16px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <h1>Tree View Test</h1>
+    <button onclick="loadTestData()">Load Test Data</button>
+    <button onclick="getSelectedUrls()">Get Selected URLs</button>
+    <button onclick="expandAll()">Expand All</button>
+    <button onclick="collapseAll()">Collapse All</button>
+    <div id="url-list"></div>
+    <div id="output" style="margin-top: 20px; padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 4px;"></div>
+
+    <script>
+        // Test data with parent-child relationships
+        const testUrls = [
+            { url: 'https://example.com/', type: 'internal', level: 0, parent: null },
+            { url: 'https://example.com/about', type: 'internal', level: 1, parent: 'https://example.com/' },
+            { url: 'https://example.com/contact', type: 'internal', level: 1, parent: 'https://example.com/' },
+            { url: 'https://example.com/products', type: 'internal', level: 1, parent: 'https://example.com/' },
+            { url: 'https://example.com/products/item1', type: 'internal', level: 2, parent: 'https://example.com/products' },
+            { url: 'https://example.com/products/item2', type: 'internal', level: 2, parent: 'https://example.com/products' },
+            { url: 'https://example.com/products/item1/details', type: 'internal', level: 3, parent: 'https://example.com/products/item1' },
+            { url: 'https://external.com/', type: 'external', level: 1, parent: 'https://example.com/' },
+            { url: 'https://cdn.example.com/image.jpg', type: 'media', level: 1, parent: 'https://example.com/' },
+            { url: 'https://cdn.example.com/video.mp4', type: 'media', level: 2, parent: 'https://cdn.example.com/image.jpg' }
+        ];
+
+        // Copy tree functions from popup.js
+        function buildTree(urls) {
+            const urlMap = new Map();
+            urls.forEach(urlData => {
+                urlMap.set(urlData.url, { ...urlData, children: [] });
+            });
+
+            const roots = [];
+            urlMap.forEach((urlData, url) => {
+                if (urlData.parent && urlMap.has(urlData.parent)) {
+                    urlMap.get(urlData.parent).children.push(urlData);
+                } else {
+                    roots.push(urlData);
+                }
+            });
+
+            return roots;
+        }
+
+        function createTreeNode(urlData, index) {
+            const node = document.createElement('div');
+            node.className = 'tree-node';
+            node.dataset.url = urlData.url;
+            node.dataset.type = urlData.type;
+
+            const hasChildren = urlData.children && urlData.children.length > 0;
+
+            const content = document.createElement('div');
+            content.className = 'tree-node-content';
+
+            const expandIcon = document.createElement('span');
+            expandIcon.className = 'tree-expand-icon' + (hasChildren ? '' : ' empty');
+            expandIcon.textContent = hasChildren ? '▶' : '';
+            expandIcon.onclick = (e) => {
+                e.stopPropagation();
+                toggleTreeNode(node);
+            };
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'tree-node-checkbox';
+            checkbox.id = `url-${index}`;
+            checkbox.checked = urlData.type === 'internal';
+            checkbox.dataset.url = urlData.url;
+            checkbox.onclick = (e) => {
+                e.stopPropagation();
+                handleCheckboxChange(node, checkbox.checked);
+            };
+
+            const label = document.createElement('span');
+            label.className = 'tree-node-label';
+            label.textContent = urlData.url;
+            label.title = urlData.url;
+
+            const badge = document.createElement('span');
+            badge.className = 'tree-node-badge';
+            if (urlData.type === 'internal') {
+                badge.classList.add('badge-internal');
+                badge.textContent = 'INT';
+            } else if (urlData.type === 'external') {
+                badge.classList.add('badge-external');
+                badge.textContent = 'EXT';
+            } else {
+                badge.classList.add('badge-media');
+                badge.textContent = 'MEDIA';
+            }
+
+            content.appendChild(expandIcon);
+            content.appendChild(checkbox);
+            content.appendChild(label);
+            content.appendChild(badge);
+            node.appendChild(content);
+
+            if (hasChildren) {
+                const childrenContainer = document.createElement('div');
+                childrenContainer.className = 'tree-children';
+
+                urlData.children.forEach((child, childIndex) => {
+                    const childNode = createTreeNode(child, `${index}-${childIndex}`);
+                    childrenContainer.appendChild(childNode);
+                });
+
+                node.appendChild(childrenContainer);
+            }
+
+            return node;
+        }
+
+        function toggleTreeNode(node) {
+            const expandIcon = node.querySelector('.tree-expand-icon');
+            const children = node.querySelector('.tree-children');
+
+            if (!children || expandIcon.classList.contains('empty')) return;
+
+            if (children.classList.contains('expanded')) {
+                children.classList.remove('expanded');
+                expandIcon.textContent = '▶';
+            } else {
+                children.classList.add('expanded');
+                expandIcon.textContent = '▼';
+            }
+        }
+
+        function handleCheckboxChange(node, isChecked) {
+            const childCheckboxes = node.querySelectorAll('.tree-children .tree-node-checkbox');
+            childCheckboxes.forEach(cb => {
+                cb.checked = isChecked;
+            });
+
+            updateParentCheckboxState(node);
+        }
+
+        function updateParentCheckboxState(node) {
+            let parent = node.parentElement;
+            while (parent && !parent.classList.contains('tree-node')) {
+                parent = parent.parentElement;
+            }
+
+            if (!parent) return;
+
+            const parentCheckbox = parent.querySelector(':scope > .tree-node-content > .tree-node-checkbox');
+            if (!parentCheckbox) return;
+
+            const childrenContainer = parent.querySelector(':scope > .tree-children');
+            if (!childrenContainer) return;
+
+            const childCheckboxes = Array.from(
+                childrenContainer.querySelectorAll(':scope > .tree-node > .tree-node-content > .tree-node-checkbox')
+            );
+
+            if (childCheckboxes.length === 0) return;
+
+            const checkedCount = childCheckboxes.filter(cb => cb.checked).length;
+
+            if (checkedCount === 0) {
+                parentCheckbox.checked = false;
+                parentCheckbox.indeterminate = false;
+            } else if (checkedCount === childCheckboxes.length) {
+                parentCheckbox.checked = true;
+                parentCheckbox.indeterminate = false;
+            } else {
+                parentCheckbox.checked = false;
+                parentCheckbox.indeterminate = true;
+            }
+
+            updateParentCheckboxState(parent);
+        }
+
+        function displayUrls(urls) {
+            const urlList = document.getElementById('url-list');
+            urlList.innerHTML = '';
+
+            if (urls.length === 0) {
+                urlList.innerHTML = '<div style="color: #666; text-align: center; padding: 12px;">No URLs found</div>';
+                return;
+            }
+
+            const tree = buildTree(urls);
+
+            tree.forEach((rootData, index) => {
+                const treeNode = createTreeNode(rootData, index);
+                urlList.appendChild(treeNode);
+            });
+        }
+
+        function loadTestData() {
+            displayUrls(testUrls);
+            document.getElementById('output').textContent = 'Test data loaded! Try expanding nodes and checking/unchecking items.';
+        }
+
+        function getSelectedUrls() {
+            const checkboxes = document.querySelectorAll('.tree-node-checkbox:checked');
+            const selectedUrls = Array.from(checkboxes).map(cb => cb.dataset.url);
+            document.getElementById('output').textContent = `Selected URLs (${selectedUrls.length}):\n` + selectedUrls.join('\n');
+        }
+
+        function expandAll() {
+            document.querySelectorAll('.tree-children').forEach(children => {
+                children.classList.add('expanded');
+                const node = children.parentElement;
+                const expandIcon = node.querySelector('.tree-expand-icon');
+                if (expandIcon && !expandIcon.classList.contains('empty')) {
+                    expandIcon.textContent = '▼';
+                }
+            });
+        }
+
+        function collapseAll() {
+            document.querySelectorAll('.tree-children').forEach(children => {
+                children.classList.remove('expanded');
+                const node = children.parentElement;
+                const expandIcon = node.querySelector('.tree-expand-icon');
+                if (expandIcon && !expandIcon.classList.contains('empty')) {
+                    expandIcon.textContent = '▶';
+                }
+            });
+        }
+
+        // Load test data on page load
+        loadTestData();
+    </script>
+</body>
+</html>
