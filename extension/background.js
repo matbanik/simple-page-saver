@@ -56,7 +56,8 @@ const siteMappingState = {
     processedUrls: new Set(),
     urlsToProcess: [],
     urlDataList: [],
-    parentMap: new Map() // Track parent-child relationships
+    parentMap: new Map(), // Track parent-child relationships
+    warnings: null // WarningsTracker instance for collecting warnings during site mapping
 };
 
 // Start periodic health monitoring
@@ -362,6 +363,8 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
         console.log('[Extract] HTML extracted, size:', pageData.html.length, 'chars');
 
         // Generate PDF directly if requested (using Chrome DevTools Protocol)
+        let pdfDataUrl = null;
+        let pdfFilename = null;
         if (downloadOptions.printToPdf) {
             try {
                 console.log('[Extract] Generating PDF using Chrome DevTools Protocol...');
@@ -399,29 +402,18 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
                 if (pdfData) {
                     console.log('[Extract] PDF generated successfully, size:', pdfData.byteLength, 'bytes');
 
-                    // Download the PDF using data URL (works in service workers, unlike URL.createObjectURL)
+                    // Convert PDF to data URL for inclusion in ZIP or direct download
                     const blob = new Blob([pdfData], { type: 'application/pdf' });
                     const reader = new FileReader();
-                    const filename = sanitizeFilename(pageData.title || 'page') + '.pdf';
+                    pdfFilename = sanitizeFilename(pageData.title || 'page') + '.pdf';
 
-                    await new Promise((resolve, reject) => {
-                        reader.onloadend = async () => {
-                            try {
-                                await chrome.downloads.download({
-                                    url: reader.result,
-                                    filename: filename,
-                                    saveAs: false
-                                });
-                                console.log('[Extract] PDF downloaded:', filename);
-                                warnings.addGeneric('print', `PDF saved as ${filename} (A0 size, no backgrounds)`);
-                                resolve();
-                            } catch (err) {
-                                reject(err);
-                            }
-                        };
+                    pdfDataUrl = await new Promise((resolve, reject) => {
+                        reader.onloadend = () => resolve(reader.result);
                         reader.onerror = reject;
                         reader.readAsDataURL(blob);
                     });
+
+                    console.log('[Extract] PDF prepared for download:', pdfFilename);
                 } else {
                     throw new Error('PDF generation returned no data');
                 }
@@ -479,6 +471,15 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
 
         // Prepare files for download
         const filesToDownload = [];
+
+        // Add PDF if it was generated successfully
+        if (pdfDataUrl && pdfFilename) {
+            filesToDownload.push({
+                content: pdfDataUrl,
+                filename: pdfFilename,
+                isDataUrl: true
+            });
+        }
 
         if (downloadOptions.content && result && result.markdown) {
             filesToDownload.push({
@@ -593,8 +594,8 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
             usedAI: result?.used_ai || false
         };
     } catch (error) {
-        console.error('[Extract] Error:', error);
-        showNotification('Extraction Failed', error.message);
+        console.error(`[Extract] Error for job ${jobData.id}:`, error);
+        showNotification('Extraction Failed', `Job ${jobData.id}: ${error.message}`);
 
         // Update job as failed
         jobData.status = 'failed';
@@ -648,8 +649,8 @@ async function handleMapSite(startUrl, depth) {
 
     try {
         // Create a site mapping job on backend
-        const storage = await chrome.storage.local.get(['apiUrl']);
-        const apiUrl = storage.apiUrl || 'http://localhost:8077';
+        const storage = await chrome.storage.local.get(['apiEndpoint']);
+        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
 
         const jobResponse = await fetch(`${apiUrl}/site-map/start`, {
             method: 'POST',
@@ -666,6 +667,12 @@ async function handleMapSite(startUrl, depth) {
             jobId = jobData.job_id;
             siteMappingState.currentJobId = jobId;
             siteMappingState.isPaused = false;
+
+            // Initialize warnings tracker for site mapping
+            siteMappingState.warnings = new WarningsTracker();
+            siteMappingState.warnings.setJobId(jobId);
+            console.log('[Map] Initialized warnings tracker for job:', jobId);
+
             console.log('[Map] Created backend job:', jobId);
 
             // Ensure params has title and start_url for display purposes
@@ -686,6 +693,11 @@ async function handleMapSite(startUrl, depth) {
             console.warn('[Map] Backend job creation failed, using temp job');
             jobId = tempJobId;
             siteMappingState.currentJobId = tempJobId;
+
+            // Initialize warnings tracker for temp job too
+            siteMappingState.warnings = new WarningsTracker();
+            siteMappingState.warnings.setJobId(tempJobId);
+            console.log('[Map] Initialized warnings tracker for temp job:', tempJobId);
         }
 
         const discoveredUrls = new Set([startUrl]);
@@ -795,6 +807,12 @@ async function handleMapSite(startUrl, depth) {
                 }
             } catch (error) {
                 console.error(`[Map] Error processing ${url}:`, error);
+
+                // Add warning for failed URL processing
+                if (siteMappingState.warnings) {
+                    siteMappingState.warnings.addExtractionError(url, error);
+                }
+
                 // Try to close tab if it was created
                 if (tab) {
                     try {
@@ -848,11 +866,22 @@ async function handleMapSite(startUrl, depth) {
                     urlDataList: urlDataList,
                     saved_state: jobState  // Also store in result for consistency
                 };
+
+                // Save warnings collected so far
+                if (siteMappingState.warnings && siteMappingState.warnings.hasWarnings()) {
+                    job.result.warnings = siteMappingState.warnings.exportAsText();
+                    job.result.warnings_count = siteMappingState.warnings.count();
+                    console.log(`[Map] Saved ${job.result.warnings_count} warnings to paused job`);
+                }
+
                 await jobStorage.saveJob(job);
                 console.log('[Map] Saved state to IndexedDB with', urlsToProcess.length, 'URLs remaining');
             }
 
-            showNotification('Mapping Paused', `Paused at ${discoveredUrls.size} URLs discovered`);
+            const warningsMsg = siteMappingState.warnings && siteMappingState.warnings.hasWarnings()
+                ? ` (${siteMappingState.warnings.count()} warnings)`
+                : '';
+            showNotification('Mapping Paused', `Paused at ${discoveredUrls.size} URLs discovered${warningsMsg}`);
 
             return {
                 success: true,
@@ -884,23 +913,54 @@ async function handleMapSite(startUrl, depth) {
                     total_discovered: discoveredUrls.size,
                     urlDataList: urlDataList
                 };
+
+                // Include warnings if any were collected
+                if (siteMappingState.warnings && siteMappingState.warnings.hasWarnings()) {
+                    job.result.warnings = siteMappingState.warnings.exportAsText();
+                    job.result.warnings_count = siteMappingState.warnings.count();
+                    console.log(`[Map] Collected ${job.result.warnings_count} warnings during site mapping`);
+                }
+
                 await jobStorage.saveJob(job);
             }
         }
 
-        showNotification('Mapping Complete', `Found ${urlDataList.length} URLs (Internal: ${urlDataList.filter(u => u.type === 'internal').length}, External: ${urlDataList.filter(u => u.type === 'external').length}, Media: ${urlDataList.filter(u => u.type === 'media').length})`);
+        const warningsMsg = siteMappingState.warnings && siteMappingState.warnings.hasWarnings()
+            ? ` (${siteMappingState.warnings.count()} warnings)`
+            : '';
+        showNotification('Mapping Complete', `Found ${urlDataList.length} URLs (Internal: ${urlDataList.filter(u => u.type === 'internal').length}, External: ${urlDataList.filter(u => u.type === 'external').length}, Media: ${urlDataList.filter(u => u.type === 'media').length})${warningsMsg}`);
 
         return {
             success: true,
             urls: urlDataList,
-            jobId: jobId
+            jobId: jobId,
+            warnings: siteMappingState.warnings && siteMappingState.warnings.hasWarnings()
+                ? siteMappingState.warnings.exportAsText()
+                : null
         };
     } catch (error) {
-        console.error('Map site error:', error);
-        showNotification('Mapping Failed', error.message);
+        const errorMsg = jobId ? `Job ${jobId}: ${error.message}` : error.message;
+        console.error(`[Map] Site mapping error${jobId ? ` for job ${jobId}` : ''}:`, error);
+        showNotification('Mapping Failed', errorMsg);
+
+        // Update job as failed if we have a jobId
+        if (jobId) {
+            try {
+                const job = await jobStorage.getJob(jobId);
+                if (job) {
+                    job.status = 'failed';
+                    job.error = error.message;
+                    job.completed_at = new Date().toISOString();
+                    await jobStorage.saveJob(job);
+                }
+            } catch (saveError) {
+                console.error('[Map] Failed to save error state:', saveError);
+            }
+        }
+
         return {
             success: false,
-            error: error.message,
+            error: errorMsg,
             urls: []
         };
     }
@@ -959,8 +1019,8 @@ async function handlePauseJob(jobId) {
         return { success: true, message: 'Job paused', job: backendJob };
 
     } catch (error) {
-        console.error('[Job] Failed to pause job:', error);
-        return { success: false, error: error.message };
+        console.error(`[Job] Failed to pause job ${jobId}:`, error);
+        return { success: false, error: `Failed to pause job ${jobId}: ${error.message}` };
     }
 }
 
@@ -972,7 +1032,7 @@ async function handleResumeJob(jobId) {
         // Get job from IndexedDB to retrieve saved state
         const job = await jobStorage.getJob(jobId);
         if (!job) {
-            throw new Error('Job not found in IndexedDB');
+            throw new Error(`Job ${jobId} not found in IndexedDB`);
         }
 
         // Clear local pause flag
@@ -1015,8 +1075,8 @@ async function handleResumeJob(jobId) {
         return { success: true, message: 'Job resumed', job: result.job };
 
     } catch (error) {
-        console.error('[Job] Failed to resume job:', error);
-        return { success: false, error: error.message };
+        console.error(`[Job] Failed to resume job ${jobId}:`, error);
+        return { success: false, error: `Failed to resume job ${jobId}: ${error.message}` };
     }
 }
 
@@ -1041,8 +1101,13 @@ async function continueSiteMapping(jobId, savedState) {
         siteMappingState.urlDataList = urlDataList;
         siteMappingState.parentMap = parentMap;
 
-        const storage = await chrome.storage.local.get(['apiUrl']);
-        const apiUrl = storage.apiUrl || 'http://localhost:8077';
+        // Restore or create warnings tracker for resumed job
+        siteMappingState.warnings = new WarningsTracker();
+        siteMappingState.warnings.setJobId(jobId);
+        console.log('[Map] Initialized warnings tracker for resumed job:', jobId);
+
+        const storage = await chrome.storage.local.get(['apiEndpoint']);
+        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
 
         console.log(`[Map] Resuming with ${urlsToProcess.length} URLs to process, ${discoveredUrls.size} discovered so far`);
 
@@ -1136,6 +1201,12 @@ async function continueSiteMapping(jobId, savedState) {
                 }
             } catch (error) {
                 console.error(`[Map Resume] Error processing ${url}:`, error);
+
+                // Add warning for failed URL processing
+                if (siteMappingState.warnings) {
+                    siteMappingState.warnings.addExtractionError(url, error);
+                }
+
                 // Try to close tab if it was created
                 if (tab) {
                     try {
@@ -1175,11 +1246,22 @@ async function continueSiteMapping(jobId, savedState) {
                     urlDataList: urlDataList,
                     saved_state: jobState  // Also store in result for consistency
                 };
+
+                // Save warnings collected so far
+                if (siteMappingState.warnings && siteMappingState.warnings.hasWarnings()) {
+                    job.result.warnings = siteMappingState.warnings.exportAsText();
+                    job.result.warnings_count = siteMappingState.warnings.count();
+                    console.log(`[Map] Saved ${job.result.warnings_count} warnings to paused job (resume)`);
+                }
+
                 await jobStorage.saveJob(job);
                 console.log('[Map] Saved state to IndexedDB with', urlsToProcess.length, 'URLs remaining');
             }
 
-            showNotification('Mapping Paused', `Paused at ${discoveredUrls.size} URLs discovered`);
+            const warningsMsg = siteMappingState.warnings && siteMappingState.warnings.hasWarnings()
+                ? ` (${siteMappingState.warnings.count()} warnings)`
+                : '';
+            showNotification('Mapping Paused', `Paused at ${discoveredUrls.size} URLs discovered${warningsMsg}`);
         } else {
             // Complete the job
             console.log('[Map] Job completed after resume');
@@ -1202,6 +1284,14 @@ async function continueSiteMapping(jobId, savedState) {
                     total_discovered: discoveredUrls.size,
                     urlDataList: urlDataList
                 };
+
+                // Include warnings if any were collected
+                if (siteMappingState.warnings && siteMappingState.warnings.hasWarnings()) {
+                    job.result.warnings = siteMappingState.warnings.exportAsText();
+                    job.result.warnings_count = siteMappingState.warnings.count();
+                    console.log(`[Map] Collected ${job.result.warnings_count} warnings during resumed site mapping`);
+                }
+
                 // Clear saved state
                 if (!job.params) {
                     job.params = {};
@@ -1210,12 +1300,15 @@ async function continueSiteMapping(jobId, savedState) {
                 await jobStorage.saveJob(job);
             }
 
-            showNotification('Mapping Complete', `Found ${urlDataList.length} URLs`);
+            const warningsMsg = siteMappingState.warnings && siteMappingState.warnings.hasWarnings()
+                ? ` (${siteMappingState.warnings.count()} warnings)`
+                : '';
+            showNotification('Mapping Complete', `Found ${urlDataList.length} URLs${warningsMsg}`);
         }
 
     } catch (error) {
-        console.error('[Map] Error continuing site mapping:', error);
-        showNotification('Mapping Failed', error.message);
+        console.error(`[Map] Error continuing site mapping for job ${jobId}:`, error);
+        showNotification('Mapping Failed', `Job ${jobId}: ${error.message}`);
     }
 }
 
@@ -1261,8 +1354,8 @@ async function handleStopJob(jobId) {
         return { success: true, message: 'Job stopped. Discovered data preserved.', job: backendJob };
 
     } catch (error) {
-        console.error('[Job] Failed to stop job:', error);
-        return { success: false, error: error.message };
+        console.error(`[Job] Failed to stop job ${jobId}:`, error);
+        return { success: false, error: `Failed to stop job ${jobId}: ${error.message}` };
     }
 }
 
@@ -1303,8 +1396,8 @@ async function handleCompleteNowJob(jobId) {
         return { success: true, message: 'Job will complete after current URL' };
 
     } catch (error) {
-        console.error('[Job] Failed to complete job:', error);
-        return { success: false, error: error.message };
+        console.error(`[Job] Failed to complete job ${jobId}:`, error);
+        return { success: false, error: `Failed to complete job ${jobId}: ${error.message}` };
     }
 }
 

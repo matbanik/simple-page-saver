@@ -1567,8 +1567,8 @@ async function pauseJob(jobId) {
             throw new Error(response.error || 'Failed to pause job');
         }
     } catch (error) {
-        console.error('[Jobs] Error pausing job:', error);
-        showStatus(`Failed to pause job: ${error.message}`, 'error');
+        console.error(`[Jobs] Error pausing job ${jobId}:`, error);
+        showStatus(`Failed to pause job ${jobId}: ${error.message}`, 'error');
     }
 }
 
@@ -1589,8 +1589,8 @@ async function resumeJob(jobId) {
             throw new Error(response.error || 'Failed to resume job');
         }
     } catch (error) {
-        console.error('[Jobs] Error resuming job:', error);
-        showStatus(`Failed to resume job: ${error.message}`, 'error');
+        console.error(`[Jobs] Error resuming job ${jobId}:`, error);
+        showStatus(`Failed to resume job ${jobId}: ${error.message}`, 'error');
     }
 }
 
@@ -1611,8 +1611,8 @@ async function stopJob(jobId) {
             throw new Error(response.error || 'Failed to stop job');
         }
     } catch (error) {
-        console.error('[Jobs] Error stopping job:', error);
-        showStatus(`Failed to stop job: ${error.message}`, 'error');
+        console.error(`[Jobs] Error stopping job ${jobId}:`, error);
+        showStatus(`Failed to stop job ${jobId}: ${error.message}`, 'error');
     }
 }
 
@@ -1633,8 +1633,8 @@ async function completeNowJob(jobId) {
             throw new Error(response.error || 'Failed to complete job');
         }
     } catch (error) {
-        console.error('[Jobs] Error completing job:', error);
-        showStatus(`Failed to complete job: ${error.message}`, 'error');
+        console.error(`[Jobs] Error completing job ${jobId}:`, error);
+        showStatus(`Failed to complete job ${jobId}: ${error.message}`, 'error');
     }
 }
 
@@ -1669,8 +1669,8 @@ async function viewJobProgress(job) {
             showStatus(`Progress: ${progress.message || 'No progress data available'}`, 'info');
         }
     } catch (error) {
-        console.error('[Jobs] Error viewing job progress:', error);
-        showStatus(`Failed to view progress: ${error.message}`, 'error');
+        console.error(`[Jobs] Error viewing job ${job.id} progress:`, error);
+        showStatus(`Failed to view progress for job ${job.id}: ${error.message}`, 'error');
     }
 }
 
