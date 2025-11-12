@@ -1,4 +1,4 @@
-REM Convenience launcher for Simple Page Saver GUI
-cd .\backend\  
-venv\Scripts\activate 
-python .\launcher.py -g
+cd backend
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
