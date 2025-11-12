@@ -57,3 +57,4 @@ backend/*.db
 backend/*.sqlite
 backend/uploads/
 backend/downloads/
+settings.json
