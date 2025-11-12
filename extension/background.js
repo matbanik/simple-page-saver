@@ -532,6 +532,13 @@ async function handleMapSite(startUrl, depth) {
             siteMappingState.isPaused = false;
             console.log('[Map] Created site mapping job:', jobId);
 
+            // Ensure params has title and start_url for display purposes
+            if (!jobData.params) {
+                jobData.params = {};
+            }
+            jobData.params.title = jobTitle;
+            jobData.params.start_url = startUrl;
+
             // Save job to IndexedDB for persistence (Bug fix #4)
             await jobStorage.saveJob(jobData);
         }
