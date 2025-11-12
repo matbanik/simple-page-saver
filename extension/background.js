@@ -225,7 +225,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 function showNotification(title, message, type = 'basic') {
     chrome.notifications.create({
         type: type,
-        iconUrl: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y="75" font-size="75">📄</text></svg>',
+        iconUrl: chrome.runtime.getURL('icons/icon48.png'),
         title: title,
         message: message,
         priority: 2
