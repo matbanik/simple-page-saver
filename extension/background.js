@@ -7,12 +7,21 @@ importScripts('jszip.min.js');
 // Import screenshot and warnings utilities
 importScripts('screenshot-utils.js');
 importScripts('warnings-tracker.js');
+importScripts('job-storage.js');
 
 const API_BASE_URL = 'http://localhost:8077';
 const DELAY_AFTER_LOAD = 2000; // Wait 2 seconds after page load for dynamic content
 
 console.log('[Simple Page Saver] Background service worker loaded');
 console.log('[Simple Page Saver] JSZip available:', typeof JSZip !== 'undefined');
+
+// Initialize job storage
+console.log('[JobStorage] Initializing IndexedDB...');
+jobStorage.init().then(() => {
+    console.log('[JobStorage] IndexedDB initialized successfully');
+}).catch(error => {
+    console.error('[JobStorage] Failed to initialize IndexedDB:', error);
+});
 
 // Connection state management
 const connectionState = {
@@ -21,6 +30,17 @@ const connectionState = {
     consecutiveFailures: 0,
     aiEnabled: false,
     monitoring: false
+};
+
+// Site mapping state (for pause/resume)
+const siteMappingState = {
+    currentJobId: null,
+    isPaused: false,
+    discoveredUrls: new Set(),
+    processedUrls: new Set(),
+    urlsToProcess: [],
+    urlDataList: [],
+    parentMap: new Map() // Track parent-child relationships
 };
 
 // Start periodic health monitoring
@@ -183,6 +203,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 console.error('[Simple Page Saver] Multi-extract failed:', error);
                 sendResponse({ success: false, error: error.message });
             });
+        return true;
+    } else if (request.action === 'PAUSE_JOB') {
+        handlePauseJob(request.jobId)
+            .then(response => sendResponse(response))
+            .catch(error => sendResponse({ success: false, error: error.message }));
+        return true;
+    } else if (request.action === 'RESUME_JOB') {
+        handleResumeJob(request.jobId)
+            .then(response => sendResponse(response))
+            .catch(error => sendResponse({ success: false, error: error.message }));
+        return true;
+    } else if (request.action === 'STOP_JOB') {
+        handleStopJob(request.jobId)
+            .then(response => sendResponse(response))
+            .catch(error => sendResponse({ success: false, error: error.message }));
         return true;
     }
 });
@@ -596,6 +631,122 @@ async function handleMapSite(startUrl, depth) {
             error: error.message,
             urls: []
         };
+    }
+}
+
+// Pause a job
+async function handlePauseJob(jobId) {
+    try {
+        console.log('[Job] Pausing job:', jobId);
+
+        // Set local pause flag
+        if (siteMappingState.currentJobId === jobId) {
+            siteMappingState.isPaused = true;
+        }
+
+        // Update backend
+        const storage = await chrome.storage.local.get(['apiEndpoint']);
+        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+
+        const response = await fetch(`${apiUrl}/jobs/${jobId}/pause`, {
+            method: 'POST'
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to pause job: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+
+        // Save to IndexedDB
+        await jobStorage.updateJobStatus(jobId, 'paused');
+
+        console.log('[Job] Job paused successfully');
+        return { success: true, message: 'Job paused', job: result.job };
+
+    } catch (error) {
+        console.error('[Job] Failed to pause job:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// Resume a job
+async function handleResumeJob(jobId) {
+    try {
+        console.log('[Job] Resuming job:', jobId);
+
+        // Clear local pause flag
+        if (siteMappingState.currentJobId === jobId) {
+            siteMappingState.isPaused = false;
+        }
+
+        // Update backend
+        const storage = await chrome.storage.local.get(['apiEndpoint']);
+        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+
+        const response = await fetch(`${apiUrl}/jobs/${jobId}/resume`, {
+            method: 'POST'
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to resume job: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+
+        // Save to IndexedDB
+        await jobStorage.updateJobStatus(jobId, 'processing');
+
+        console.log('[Job] Job resumed successfully');
+
+        // If this is the current site mapping job, continue processing
+        if (siteMappingState.currentJobId === jobId) {
+            // TODO: Continue site mapping from where we left off
+            console.log('[Job] Continuing site mapping...');
+        }
+
+        return { success: true, message: 'Job resumed', job: result.job };
+
+    } catch (error) {
+        console.error('[Job] Failed to resume job:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// Stop a job
+async function handleStopJob(jobId) {
+    try {
+        console.log('[Job] Stopping job:', jobId);
+
+        // Stop local processing
+        if (siteMappingState.currentJobId === jobId) {
+            siteMappingState.isPaused = true;
+            siteMappingState.currentJobId = null;
+        }
+
+        // Update backend
+        const storage = await chrome.storage.local.get(['apiEndpoint']);
+        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+
+        const response = await fetch(`${apiUrl}/jobs/${jobId}/stop`, {
+            method: 'POST'
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to stop job: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+
+        // Save to IndexedDB (stopped jobs are paused)
+        await jobStorage.updateJobStatus(jobId, 'paused');
+
+        console.log('[Job] Job stopped successfully');
+        return { success: true, message: 'Job stopped. Discovered data preserved.', job: result.job };
+
+    } catch (error) {
+        console.error('[Job] Failed to stop job:', error);
+        return { success: false, error: error.message };
     }
 }
 

@@ -600,6 +600,103 @@ async def delete_job(job_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/jobs/{job_id}/pause")
+async def pause_job(job_id: str):
+    """
+    Pause a running job
+    """
+    try:
+        logger.info(f"Pausing job: {job_id}")
+        job = job_manager.get_job(job_id)
+
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        success = job_manager.pause_job(job_id)
+
+        if not success:
+            raise HTTPException(
+                status_code=400,
+                detail="Job cannot be paused (must be in processing state)"
+            )
+
+        logger.info(f"Job paused successfully: {job_id}")
+        return {"success": True, "message": "Job paused", "job": job.to_dict()}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error pausing job: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/jobs/{job_id}/resume")
+async def resume_job(job_id: str):
+    """
+    Resume a paused job
+    """
+    try:
+        logger.info(f"Resuming job: {job_id}")
+        job = job_manager.get_job(job_id)
+
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        success = job_manager.resume_job(job_id)
+
+        if not success:
+            raise HTTPException(
+                status_code=400,
+                detail="Job cannot be resumed (must be in paused state)"
+            )
+
+        logger.info(f"Job resumed successfully: {job_id}")
+        return {"success": True, "message": "Job resumed", "job": job.to_dict()}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resuming job: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/jobs/{job_id}/stop")
+async def stop_job(job_id: str):
+    """
+    Stop a job (same as pause, but indicates user intention to stop)
+    Job data is preserved so user can still access discovered URLs
+    """
+    try:
+        logger.info(f"Stopping job: {job_id}")
+        job = job_manager.get_job(job_id)
+
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # For now, stop is the same as pause
+        # The job stays in the system with its current progress
+        success = job_manager.pause_job(job_id)
+
+        if not success:
+            raise HTTPException(
+                status_code=400,
+                detail="Job cannot be stopped (must be in processing state)"
+            )
+
+        logger.info(f"Job stopped successfully: {job_id}")
+        return {
+            "success": True,
+            "message": "Job stopped. Discovered data is preserved.",
+            "job": job.to_dict()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error stopping job: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/diagnostics")
 async def get_diagnostics():
     """
