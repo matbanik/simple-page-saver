@@ -241,8 +241,7 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
             content: true,
             mediaLinks: false,
             externalLinks: false,
-            screenshot: false,
-            preserveColor: false
+            printToPdf: false
         };
     }
 
@@ -280,17 +279,24 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
         console.log('[Extract] Waiting for dynamic content...');
         await sleep(DELAY_AFTER_LOAD);
 
-        // Detect infinite scroll before capturing screenshot
-        if (downloadOptions.screenshot) {
-            console.log('[Extract] Checking for infinite scroll...');
-            const infiniteScrollResult = await detectInfiniteScroll(tab.id);
-            if (infiniteScrollResult.hasInfiniteScroll) {
-                warnings.addInfiniteScrollWarning(url, infiniteScrollResult.confidence);
-            }
+        // Trigger print dialog if PDF printing is requested
+        if (downloadOptions.printToPdf) {
+            try {
+                console.log('[Extract] Opening print dialog...');
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    func: () => {
+                        window.print();
+                    }
+                });
+                console.log('[Extract] Print dialog opened');
 
-            // Additional wait for screenshot to ensure page is fully rendered
-            console.log('[Extract] Waiting for page to stabilize before screenshot...');
-            await sleep(2000); // Extra 2 second delay for screenshots
+                // Add informational note
+                warnings.addGeneric('print', 'Print dialog opened. Select "Save as PDF" as the destination to save the entire page as PDF.');
+            } catch (error) {
+                console.error('[Extract] Failed to open print dialog:', error);
+                warnings.addGeneric('print', `Failed to open print dialog: ${error.message}`);
+            }
         }
 
         // Extract HTML from the page
@@ -300,33 +306,6 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
 
         let result = null;
         let externalLinks = [];
-        let screenshotData = null;
-
-        // Capture screenshot if requested
-        if (downloadOptions.screenshot) {
-            try {
-                console.log('[Extract] Capturing screenshot...');
-                const screenshotResult = await captureFullPageScreenshot(tab.id, {
-                    preserveColor: downloadOptions.preserveColor || false,
-                    format: 'webp',  // Use WebP for better compression
-                    quality: 95  // High quality for sharp text and details
-                });
-
-                screenshotData = screenshotResult;
-
-                // Add any screenshot warnings
-                if (screenshotResult.warnings && screenshotResult.warnings.length > 0) {
-                    screenshotResult.warnings.forEach(msg => {
-                        warnings.addGeneric('screenshot', msg);
-                    });
-                }
-
-                console.log('[Extract] Screenshot captured successfully');
-            } catch (error) {
-                console.error('[Extract] Screenshot capture failed:', error);
-                warnings.addScreenshotFailure(url, error);
-            }
-        }
 
         // Process with backend if content is requested
         if (downloadOptions.content) {
@@ -385,20 +364,6 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
             });
         }
 
-        // Add screenshot if captured
-        if (screenshotData && screenshotData.dataUrl) {
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            // Bug fix #6: Add fallback for empty/undefined titles
-            const pageTitle = (pageData.title || 'page').replace(/[^a-z0-9]/gi, '_').substring(0, 50);
-            const screenshotFilename = `screenshot_${pageTitle}_${timestamp}.${screenshotData.format}`;
-
-            filesToDownload.push({
-                content: screenshotData.dataUrl,
-                filename: screenshotFilename,
-                isDataUrl: true  // Flag to handle data URLs differently
-            });
-        }
-
         // Add warnings.txt if there are any warnings
         if (warnings.hasWarnings()) {
             const warningsText = warnings.exportAsText();
@@ -448,7 +413,7 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
                 console.log('[Extract] Downloading:', file.filename);
 
                 if (file.isDataUrl) {
-                    // For data URLs (screenshots), download directly
+                    // For data URLs (images, media), download directly
                     await chrome.downloads.download({
                         url: file.content,
                         filename: file.filename,

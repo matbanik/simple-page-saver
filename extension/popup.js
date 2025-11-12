@@ -79,15 +79,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log('[Prompt] Custom prompt saved');
     });
 
-    // Screenshot checkbox - enable/disable preserve color option
-    document.getElementById('include-screenshot').addEventListener('change', (e) => {
-        const preserveColorCheckbox = document.getElementById('preserve-color');
-        preserveColorCheckbox.disabled = !e.target.checked;
-        if (!e.target.checked) {
-            preserveColorCheckbox.checked = false;
-        }
-    });
-
     // Load AI enabled setting
     await loadAISettings();
 
@@ -171,12 +162,11 @@ async function extractCurrentPage() {
         const downloadContent = document.getElementById('download-content').checked;
         const downloadMediaLinks = document.getElementById('download-media-links').checked;
         const downloadExternalLinks = document.getElementById('download-external-links').checked;
-        const includeScreenshot = document.getElementById('include-screenshot').checked;
-        const preserveColor = document.getElementById('preserve-color').checked;
+        const printToPdf = document.getElementById('print-to-pdf').checked;
         const useZip = document.getElementById('single-page-zip').checked;
 
         // Validate at least one option selected
-        if (!downloadContent && !downloadMediaLinks && !downloadExternalLinks && !includeScreenshot) {
+        if (!downloadContent && !downloadMediaLinks && !downloadExternalLinks && !printToPdf) {
             showStatus('Please select at least one download option', 'error');
             disableButtons(false);
             return;
@@ -191,8 +181,7 @@ async function extractCurrentPage() {
                 content: downloadContent,
                 mediaLinks: downloadMediaLinks,
                 externalLinks: downloadExternalLinks,
-                screenshot: includeScreenshot,
-                preserveColor: preserveColor
+                printToPdf: printToPdf
             }
         });
 
