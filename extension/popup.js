@@ -79,6 +79,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.log('[Prompt] Custom prompt saved');
     });
 
+    // Initialize AI setting if not set (ensure it exists with explicit false value)
+    const aiCheck = await chrome.storage.local.get(['enableAI']);
+    if (aiCheck.enableAI === undefined) {
+        await chrome.storage.local.set({ enableAI: false });
+        console.log('[Popup] Initialized enableAI to false');
+    }
+
     // Load AI enabled setting
     await loadAISettings();
 
@@ -745,6 +752,12 @@ async function loadAISettings() {
     updateAIStatus(enableAI);
 
     console.log('[Settings] AI enabled:', enableAI);
+    console.log('[Settings] AI checkbox state:', document.getElementById('enable-ai').checked);
+
+    // Log to help debug if AI is being used when it shouldn't be
+    if (!enableAI) {
+        console.log('[Settings] ⚠️ AI is DISABLED - backend should use fallback');
+    }
 }
 
 // Load extraction mode settings
@@ -818,6 +831,11 @@ async function handleAIToggle(event) {
 
     await chrome.storage.local.set({ enableAI });
     console.log('[Settings] AI toggled:', enableAI ? 'ON' : 'OFF');
+    console.log('[Settings] Saved to storage: enableAI =', enableAI);
+
+    // Verify it was saved
+    const verify = await chrome.storage.local.get(['enableAI']);
+    console.log('[Settings] Verification - enableAI in storage:', verify.enableAI);
 
     updateAIStatus(enableAI);
 
@@ -1041,32 +1059,47 @@ async function updateConnectionStatus() {
             const statusDot = statusDiv.querySelector('.status-dot');
 
             if (state.isConnected) {
-                statusDiv.className = 'connected';
-                statusDot.className = 'status-dot green';
+                // Backend is connected
+                if (state.isBusy) {
+                    // Backend is busy/slow
+                    statusDiv.className = 'checking';
+                    statusDot.className = 'status-dot orange';
 
-                let text = '✓ Backend connected';
-                if (state.aiEnabled) {
-                    text += ' (AI enabled)';
-                } else {
-                    text += ' (Fallback mode)';
-                }
-
-                // Show time since last ping
-                if (state.lastSuccessfulPing) {
-                    const secondsAgo = Math.floor((Date.now() - state.lastSuccessfulPing) / 1000);
-                    if (secondsAgo < 60) {
-                        text += ` • ${secondsAgo}s ago`;
+                    let text = '⏳ Backend busy';
+                    if (state.averageResponseTime > 0) {
+                        text += ` (${state.averageResponseTime}ms avg)`;
                     }
-                }
+                    statusText.textContent = text;
+                } else {
+                    // Backend is healthy
+                    statusDiv.className = 'connected';
+                    statusDot.className = 'status-dot green';
 
-                statusText.textContent = text;
+                    let text = '✓ Backend connected';
+                    if (state.aiEnabled) {
+                        text += ' (AI enabled)';
+                    } else {
+                        text += ' (Fallback mode)';
+                    }
+
+                    // Show time since last ping
+                    if (state.lastSuccessfulPing) {
+                        const secondsAgo = Math.floor((Date.now() - state.lastSuccessfulPing) / 1000);
+                        if (secondsAgo < 60) {
+                            text += ` • ${secondsAgo}s ago`;
+                        }
+                    }
+
+                    statusText.textContent = text;
+                }
             } else {
+                // Backend is offline
                 statusDiv.className = 'disconnected';
                 statusDot.className = 'status-dot red';
 
-                let text = '✗ Backend disconnected';
+                let text = '✗ Backend offline';
                 if (state.consecutiveFailures > 0) {
-                    text += ` (${state.consecutiveFailures} failures)`;
+                    text += ` (${state.consecutiveFailures} attempts)`;
                 }
 
                 statusText.textContent = text;
@@ -1453,25 +1486,39 @@ function isRecent(timestamp) {
 
 // Remove a single job from the backend
 async function removeJob(jobId) {
-    console.log('[Jobs] Removing job from backend:', jobId);
+    console.log('[Jobs] Removing job:', jobId);
 
     try {
-        // Get API URL
-        const apiUrl = await getBackendUrl();
+        // Try to delete from backend first
+        try {
+            const apiUrl = await getBackendUrl();
+            const response = await fetch(`${apiUrl}/jobs/${jobId}`, {
+                method: 'DELETE'
+            });
 
-        // Delete from backend
-        const response = await fetch(`${apiUrl}/jobs/${jobId}`, {
-            method: 'DELETE'
-        });
-
-        if (!response.ok) {
-            throw new Error(`Failed to delete job: ${response.status}`);
+            if (response.ok) {
+                console.log('[Jobs] Deleted job from backend:', jobId);
+            } else if (response.status === 404) {
+                console.log('[Jobs] Job not found in backend (may be local only):', jobId);
+            } else {
+                console.warn('[Jobs] Backend delete returned:', response.status);
+            }
+        } catch (backendError) {
+            console.warn('[Jobs] Could not delete from backend:', backendError.message);
         }
 
-        // Refresh jobs list from backend
+        // Also delete from IndexedDB
+        try {
+            await jobStorage.deleteJob(jobId);
+            console.log('[Jobs] Deleted job from IndexedDB:', jobId);
+        } catch (indexedDbError) {
+            console.warn('[Jobs] Could not delete from IndexedDB:', indexedDbError.message);
+        }
+
+        // Refresh jobs list
         await loadJobs();
 
-        showStatus('Job removed', 'info');
+        showStatus('Job removed', 'success');
     } catch (error) {
         console.error('[Jobs] Error removing job:', error);
         showStatus('Failed to remove job', 'error');
@@ -1585,29 +1632,54 @@ async function clearCompletedJobs() {
     console.log('[Jobs] Clearing completed jobs');
 
     try {
-        // Get API URL and current jobs
-        const apiUrl = await getBackendUrl();
+        let deletedCount = 0;
 
-        // Get all jobs from backend
-        const response = await fetch(`${apiUrl}/jobs?limit=100`);
-        if (!response.ok) {
-            throw new Error(`Failed to fetch jobs: ${response.status}`);
+        // Get and delete from backend
+        try {
+            const apiUrl = await getBackendUrl();
+            const response = await fetch(`${apiUrl}/jobs?limit=100`);
+
+            if (response.ok) {
+                const data = await response.json();
+                const backendJobs = data.jobs || [];
+
+                // Delete completed/failed jobs from backend
+                const backendDeletePromises = backendJobs
+                    .filter(job => job.status === 'completed' || job.status === 'failed')
+                    .map(job => {
+                        deletedCount++;
+                        return fetch(`${apiUrl}/jobs/${job.id}`, { method: 'DELETE' })
+                            .catch(err => console.warn(`[Jobs] Failed to delete ${job.id}:`, err.message));
+                    });
+
+                await Promise.all(backendDeletePromises);
+                console.log('[Jobs] Deleted', deletedCount, 'jobs from backend');
+            }
+        } catch (backendError) {
+            console.warn('[Jobs] Could not clear from backend:', backendError.message);
         }
 
-        const data = await response.json();
-        const allJobs = data.jobs || [];
+        // Get and delete from IndexedDB
+        try {
+            const completedJobs = await jobStorage.getJobsByStatus('completed');
+            const failedJobs = await jobStorage.getJobsByStatus('failed');
 
-        // Delete completed/failed jobs from backend
-        const deletePromises = allJobs
-            .filter(job => job.status === 'completed' || job.status === 'failed')
-            .map(job => fetch(`${apiUrl}/jobs/${job.id}`, { method: 'DELETE' }));
+            const indexedDbDeletePromises = [...completedJobs, ...failedJobs].map(job => {
+                deletedCount++;
+                return jobStorage.deleteJob(job.id)
+                    .catch(err => console.warn(`[Jobs] Failed to delete ${job.id} from IndexedDB:`, err.message));
+            });
 
-        await Promise.all(deletePromises);
+            await Promise.all(indexedDbDeletePromises);
+            console.log('[Jobs] Deleted', completedJobs.length + failedJobs.length, 'jobs from IndexedDB');
+        } catch (indexedDbError) {
+            console.warn('[Jobs] Could not clear from IndexedDB:', indexedDbError.message);
+        }
 
-        // Refresh jobs list from backend
+        // Refresh jobs list
         await loadJobs();
 
-        showStatus('Completed jobs cleared', 'info');
+        showStatus(`Cleared ${deletedCount} completed/failed jobs`, 'success');
     } catch (error) {
         console.error('[Jobs] Error clearing completed jobs:', error);
         showStatus('Failed to clear completed jobs', 'error');
