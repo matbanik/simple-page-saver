@@ -692,7 +692,8 @@ async function handleMapSite(startUrl, depth) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     job_id: jobId,
-                    discovered_urls: allUrls
+                    discovered_urls: allUrls,
+                    url_data_list: urlDataList  // Include full URL data for Load button
                 })
             }).catch(err => console.warn('[Map] Failed to complete job:', err));
 
@@ -980,7 +981,8 @@ async function continueSiteMapping(jobId, savedState) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     job_id: jobId,
-                    discovered_urls: allUrls
+                    discovered_urls: allUrls,
+                    url_data_list: urlDataList  // Include full URL data for Load button
                 })
             }).catch(err => console.warn('[Map] Failed to complete job:', err));
 
