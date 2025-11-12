@@ -730,6 +730,12 @@ function disableButtons(disabled) {
     document.getElementById('extract-selected').disabled = disabled;
 }
 
+// Helper function to get backend URL consistently
+async function getBackendUrl() {
+    const storage = await chrome.storage.local.get(['apiEndpoint']);
+    return storage.apiEndpoint || 'http://localhost:8077';
+}
+
 // Load AI settings
 async function loadAISettings() {
     const storage = await chrome.storage.local.get(['enableAI']);
@@ -897,8 +903,7 @@ async function testBackend() {
     showStatus('Testing backend connection...', 'info');
 
     try {
-        const storage = await chrome.storage.local.get(['apiEndpoint']);
-        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+        const apiUrl = await getBackendUrl();
 
         console.log('[Test] Connecting to:', apiUrl);
 
@@ -925,8 +930,7 @@ async function testAI() {
     showStatus('Testing AI processing...', 'info');
 
     try {
-        const storage = await chrome.storage.local.get(['apiEndpoint']);
-        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+        const apiUrl = await getBackendUrl();
 
         const testHTML = `
             <html>
@@ -979,8 +983,7 @@ async function testFallback() {
     showStatus('Testing local fallback (html2text)...', 'info');
 
     try {
-        const storage = await chrome.storage.local.get(['apiEndpoint']);
-        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+        const apiUrl = await getBackendUrl();
 
         const testHTML = `
             <html>
@@ -1077,8 +1080,7 @@ async function updateConnectionStatus() {
 // Load and display jobs from both IndexedDB and backend
 async function loadJobs() {
     try {
-        const storage = await chrome.storage.local.get(['apiEndpoint']);
-        const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
+        const apiUrl = await getBackendUrl();
 
         // Load jobs from both sources in parallel
         const [backendJobs, localJobs] = await Promise.all([
@@ -1371,7 +1373,7 @@ async function loadJobContext(job) {
                         level: index === 0 ? 0 : 1,
                         parent: index === 0 ? null : startUrl
                     };
-                }));
+                });
 
                 console.log('[Jobs] Reconstructed urlDataList:', urlDataList.length, 'items');
                 console.log('[Jobs] Reconstructed sample:', urlDataList.slice(0, 3));
@@ -1455,8 +1457,7 @@ async function removeJob(jobId) {
 
     try {
         // Get API URL
-        const storage = await chrome.storage.local.get(['apiUrl']);
-        const apiUrl = storage.apiUrl || 'http://localhost:8077';
+        const apiUrl = await getBackendUrl();
 
         // Delete from backend
         const response = await fetch(`${apiUrl}/jobs/${jobId}`, {
@@ -1489,7 +1490,7 @@ async function pauseJob(jobId) {
 
         if (response && response.success) {
             showStatus('Job paused successfully', 'success');
-            await loadActiveJobs(); // Refresh list
+            await loadJobs(); // Refresh list
         } else {
             throw new Error(response.error || 'Failed to pause job');
         }
@@ -1511,7 +1512,7 @@ async function resumeJob(jobId) {
 
         if (response && response.success) {
             showStatus('Job resumed successfully', 'success');
-            await loadActiveJobs(); // Refresh list
+            await loadJobs(); // Refresh list
         } else {
             throw new Error(response.error || 'Failed to resume job');
         }
@@ -1533,7 +1534,7 @@ async function stopJob(jobId) {
 
         if (response && response.success) {
             showStatus('Job stopped. Discovered data preserved.', 'success');
-            await loadActiveJobs(); // Refresh list
+            await loadJobs(); // Refresh list
         } else {
             throw new Error(response.error || 'Failed to stop job');
         }
@@ -1556,8 +1557,7 @@ async function viewJobProgress(job) {
                 showStatus(`Loaded ${job.result.discovered_urls.length} discovered URLs`, 'success');
             } else {
                 // Fetch current progress from backend
-                const storage = await chrome.storage.local.get(['apiUrl']);
-                const apiUrl = storage.apiUrl || 'http://localhost:8077';
+                const apiUrl = await getBackendUrl();
 
                 const response = await fetch(`${apiUrl}/jobs/${job.id}`);
                 if (!response.ok) {
@@ -1586,8 +1586,7 @@ async function clearCompletedJobs() {
 
     try {
         // Get API URL and current jobs
-        const storage = await chrome.storage.local.get(['apiUrl']);
-        const apiUrl = storage.apiUrl || 'http://localhost:8077';
+        const apiUrl = await getBackendUrl();
 
         // Get all jobs from backend
         const response = await fetch(`${apiUrl}/jobs?limit=100`);
@@ -1660,7 +1659,12 @@ async function mapSiteFromUrl(url) {
 
         if (result.success) {
             discoveredUrls = result.urls;
-            displayDiscoveredUrls(result.urls);
+            // Display URLs in the current view mode
+            if (currentViewMode === 'tree') {
+                displayUrls(result.urls);
+            } else {
+                displayUrlsFlat(result.urls);
+            }
             showStatus(`Discovered ${result.urls.length} URLs`, 'success');
         } else {
             showStatus(`Error: ${result.error}`, 'error');
@@ -1687,15 +1691,26 @@ async function scrapeManualUrl(url) {
 
         console.log('[Manual Scrape] Fetched HTML, size:', html.length);
 
-        // Process the HTML using the standard extraction flow
-        await processPage({
+        // Send to background worker to process
+        const result = await chrome.runtime.sendMessage({
+            action: 'EXTRACT_SINGLE_PAGE',
             url: url,
-            html: html,
-            title: title
+            outputZip: false,
+            downloadOptions: {
+                content: true,
+                mediaLinks: false,
+                externalLinks: false,
+                printToPdf: false
+            }
         });
 
-        // Clear the input
-        document.getElementById('manual-url-input').value = '';
+        if (result && result.success) {
+            showStatus(`✓ Page saved: ${result.filename}`, 'success');
+            // Clear the input
+            document.getElementById('manual-url-input').value = '';
+        } else {
+            throw new Error(result?.error || 'Failed to extract page');
+        }
     } catch (error) {
         console.error('[Manual Scrape] Error:', error);
         showStatus(`Failed to scrape URL: ${error.message}`, 'error');
