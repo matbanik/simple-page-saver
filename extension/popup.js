@@ -1190,6 +1190,11 @@ async function loadJobContext(job) {
             }
 
             if (urlDataList.length > 0) {
+                // Set URL input field and dropdown to Map Site mode
+                const startUrl = job.params?.start_url || urlDataList[0].url;
+                document.getElementById('manual-url-input').value = startUrl;
+                document.getElementById('url-action-type').value = 'map';
+
                 // Store the URLs globally
                 discoveredUrls = urlDataList;
 
