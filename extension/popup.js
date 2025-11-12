@@ -1154,9 +1154,24 @@ async function loadJobContext(job) {
     try {
         if (job.type === 'site_map' && job.status === 'completed' && job.result) {
             // Load discovered URLs into the site mapping section
-            const urlDataList = job.result.urlDataList || [];
+            let urlDataList = job.result.urlDataList || [];
             console.log('[Jobs] urlDataList length:', urlDataList.length);
             console.log('[Jobs] urlDataList sample:', urlDataList.slice(0, 3));
+
+            // Fallback: if urlDataList is missing but discovered_urls exists, reconstruct basic data
+            if (urlDataList.length === 0 && job.result.discovered_urls && job.result.discovered_urls.length > 0) {
+                console.log('[Jobs] urlDataList missing, reconstructing from discovered_urls');
+                const startUrl = job.params.start_url || job.result.discovered_urls[0];
+
+                urlDataList = job.result.discovered_urls.map((url, index) => ({
+                    url: url,
+                    type: 'internal',  // Default to internal
+                    level: index === 0 ? 0 : 1,  // First URL is root, others are level 1
+                    parent: index === 0 ? null : startUrl  // First URL is root, others are children of root
+                }));
+
+                console.log('[Jobs] Reconstructed urlDataList:', urlDataList.length, 'items');
+            }
 
             if (urlDataList.length > 0) {
                 // Store the URLs globally
