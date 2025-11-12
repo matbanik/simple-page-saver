@@ -1371,11 +1371,20 @@ async function processWithBackend(url, html, title) {
     const extractionMode = storage.extractionMode || 'balanced'; // Default to balanced
 
     console.log('[Backend] Using API URL:', apiUrl);
+    console.log('[Backend] Storage values:', storage);
     console.log('[Backend] AI enabled:', enableAI);
     console.log('[Backend] Extraction mode:', extractionMode);
     if (customPrompt) {
         console.log('[Backend] Custom prompt:', customPrompt.substring(0, 100) + '...');
     }
+
+    // Extra logging for AI setting to help debug
+    if (!enableAI) {
+        console.log('[Backend] ⚠️ AI is DISABLED - sending use_ai: false to backend');
+    } else {
+        console.log('[Backend] ⚠️ AI is ENABLED - sending use_ai: true to backend (will incur costs)');
+    }
+
     console.log('[Backend] Sending request to /process-html');
 
     // Wrap fetch in retry logic
