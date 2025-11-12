@@ -305,7 +305,7 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
                 const screenshotResult = await captureFullPageScreenshot(tab.id, {
                     preserveColor: downloadOptions.preserveColor || false,
                     format: 'webp',  // Use WebP for better compression
-                    quality: 85
+                    quality: 95  // High quality for sharp text and details
                 });
 
                 screenshotData = screenshotResult;

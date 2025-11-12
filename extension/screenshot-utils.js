@@ -10,7 +10,7 @@ async function captureFullPageScreenshot(tabId, options = {}) {
     const {
         preserveColor = false,
         format = 'jpeg',
-        quality = 85
+        quality = 95
     } = options;
 
     const warnings = [];
@@ -33,6 +33,14 @@ async function captureFullPageScreenshot(tabId, options = {}) {
             // Enable Page domain
             await chrome.debugger.sendCommand({ tabId }, 'Page.enable');
 
+            // Get devicePixelRatio from the page for native resolution capture
+            const devicePixelRatioResult = await chrome.scripting.executeScript({
+                target: { tabId },
+                func: () => window.devicePixelRatio || 1
+            });
+            const devicePixelRatio = devicePixelRatioResult[0].result;
+            console.log(`[Screenshot] Device pixel ratio: ${devicePixelRatio}`);
+
             // Get layout metrics to determine page size
             const { contentSize, visualViewport } = await chrome.debugger.sendCommand(
                 { tabId },
@@ -42,31 +50,40 @@ async function captureFullPageScreenshot(tabId, options = {}) {
             let pageWidth = contentSize.width;
             let pageHeight = contentSize.height;
 
-            console.log(`[Screenshot] Page dimensions: ${pageWidth}x${pageHeight}`);
+            console.log(`[Screenshot] Page dimensions (CSS pixels): ${pageWidth}x${pageHeight}`);
+            console.log(`[Screenshot] Physical dimensions (device pixels): ${Math.round(pageWidth * devicePixelRatio)}x${Math.round(pageHeight * devicePixelRatio)}`);
 
-            // CDP maximum dimension limit
+            // CDP maximum dimension limit (in device pixels after scaling)
             const MAX_DIMENSION = 16384;
 
-            // Check if page exceeds limits and auto-crop
-            if (pageHeight > MAX_DIMENSION) {
+            // Calculate physical dimensions
+            let physicalWidth = Math.round(pageWidth * devicePixelRatio);
+            let physicalHeight = Math.round(pageHeight * devicePixelRatio);
+
+            // Check if physical dimensions exceed limits and scale down
+            if (physicalHeight > MAX_DIMENSION) {
+                const scaleFactor = MAX_DIMENSION / physicalHeight;
+                pageHeight = Math.floor(pageHeight * scaleFactor);
+                physicalHeight = MAX_DIMENSION;
                 warnings.push(
-                    `Page height (${pageHeight}px) exceeds maximum screenshot limit (${MAX_DIMENSION}px). ` +
-                    `Screenshot has been cropped to maximum height. Some content at the bottom may be missing.`
+                    `Page height (${Math.round(contentSize.height * devicePixelRatio)}px at ${devicePixelRatio}x) exceeds maximum screenshot limit (${MAX_DIMENSION}px). ` +
+                    `Screenshot has been scaled down. Some content at the bottom may be cut off.`
                 );
-                pageHeight = MAX_DIMENSION;
-                console.warn('[Screenshot] Page height cropped to', MAX_DIMENSION);
+                console.warn('[Screenshot] Page height scaled down to fit', MAX_DIMENSION);
             }
 
-            if (pageWidth > MAX_DIMENSION) {
+            if (physicalWidth > MAX_DIMENSION) {
+                const scaleFactor = MAX_DIMENSION / physicalWidth;
+                pageWidth = Math.floor(pageWidth * scaleFactor);
+                physicalWidth = MAX_DIMENSION;
                 warnings.push(
-                    `Page width (${pageWidth}px) exceeds maximum screenshot limit (${MAX_DIMENSION}px). ` +
-                    `Screenshot has been cropped to maximum width. Some content on the right may be missing.`
+                    `Page width (${Math.round(contentSize.width * devicePixelRatio)}px at ${devicePixelRatio}x) exceeds maximum screenshot limit (${MAX_DIMENSION}px). ` +
+                    `Screenshot has been scaled down. Some content on the right may be cut off.`
                 );
-                pageWidth = MAX_DIMENSION;
-                console.warn('[Screenshot] Page width cropped to', MAX_DIMENSION);
+                console.warn('[Screenshot] Page width scaled down to fit', MAX_DIMENSION);
             }
 
-            // Capture screenshot using CDP
+            // Capture screenshot using CDP with native device pixel ratio for sharp text
             const screenshot = await chrome.debugger.sendCommand(
                 { tabId },
                 'Page.captureScreenshot',
@@ -78,7 +95,7 @@ async function captureFullPageScreenshot(tabId, options = {}) {
                         y: 0,
                         width: pageWidth,
                         height: pageHeight,
-                        scale: 1
+                        scale: devicePixelRatio  // Use device pixel ratio for native resolution
                     }
                 }
             );
