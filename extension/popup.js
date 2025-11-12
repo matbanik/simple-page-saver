@@ -1074,22 +1074,47 @@ async function updateConnectionStatus() {
     }
 }
 
-// Load and display jobs from backend
+// Load and display jobs from both IndexedDB and backend
 async function loadJobs() {
     try {
         const storage = await chrome.storage.local.get(['apiEndpoint']);
         const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
 
-        const response = await fetch(`${apiUrl}/jobs?limit=20`);
-        if (!response.ok) {
-            console.warn('[Jobs] Failed to load jobs:', response.status);
-            return;
-        }
+        // Load jobs from both sources in parallel
+        const [backendJobs, localJobs] = await Promise.all([
+            // Load from backend API
+            fetch(`${apiUrl}/jobs?limit=20`)
+                .then(r => r.ok ? r.json() : { jobs: [] })
+                .then(data => data.jobs || [])
+                .catch(err => {
+                    console.warn('[Jobs] Failed to load backend jobs:', err);
+                    return [];
+                }),
+            // Load from IndexedDB (local jobs)
+            jobStorage.getAllJobs().catch(err => {
+                console.warn('[Jobs] Failed to load local jobs:', err);
+                return [];
+            })
+        ]);
 
-        const data = await response.json();
-        displayJobs(data.jobs);
+        // Merge jobs, preferring backend data for jobs that exist in both
+        const jobMap = new Map();
+
+        // Add backend jobs first
+        backendJobs.forEach(job => jobMap.set(job.id, job));
+
+        // Add local jobs (won't overwrite backend jobs with same ID)
+        localJobs.forEach(job => {
+            if (!jobMap.has(job.id)) {
+                jobMap.set(job.id, job);
+            }
+        });
+
+        const allJobs = Array.from(jobMap.values());
+        displayJobs(allJobs);
     } catch (error) {
         console.warn('[Jobs] Error loading jobs:', error);
+        displayJobs([]); // Show empty state
     }
 }
 
@@ -1109,25 +1134,27 @@ function displayJobs(jobs) {
         (job.status === 'failed' && isRecent(job.completed_at))
     );
 
-    if (relevantJobs.length === 0) {
-        jobsSection.style.display = 'none';
-        clearButton.style.display = 'none';
-        return;
-    }
-
-    // Show "Clear Completed" button if there are completed/failed jobs
-    const hasCompletedJobs = relevantJobs.some(job =>
-        job.status === 'completed' || job.status === 'failed'
-    );
-    clearButton.style.display = hasCompletedJobs ? 'inline-block' : 'none';
-
+    // Always show jobs section
     jobsSection.style.display = 'block';
     jobsList.innerHTML = '';
 
-    relevantJobs.forEach(job => {
-        const jobItem = createJobElement(job);
-        jobsList.appendChild(jobItem);
-    });
+    if (relevantJobs.length === 0) {
+        // Show "No active jobs" message
+        jobsList.innerHTML = '<div class="no-jobs">No active jobs</div>';
+        clearButton.style.display = 'none';
+    } else {
+        // Show jobs
+        relevantJobs.forEach(job => {
+            const jobItem = createJobElement(job);
+            jobsList.appendChild(jobItem);
+        });
+
+        // Show "Clear Completed" button if there are completed/failed jobs
+        const hasCompletedJobs = relevantJobs.some(job =>
+            job.status === 'completed' || job.status === 'failed'
+        );
+        clearButton.style.display = hasCompletedJobs ? 'inline-block' : 'none';
+    }
 
     // Store jobs in chrome.storage for cross-tab access
     chrome.storage.local.set({ activeJobs: relevantJobs });
