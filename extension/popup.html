@@ -725,11 +725,14 @@
             </label>
         </div>
 
-        <div id="tree-controls" style="display: none; margin-bottom: 8px; display: flex; gap: 4px;">
-            <button id="expand-all" style="padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 3px; cursor: pointer;">Expand All</button>
-            <button id="collapse-all" style="padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 3px; cursor: pointer;">Collapse All</button>
-            <button id="select-all" style="padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 3px; cursor: pointer;">Select All</button>
-            <button id="deselect-all" style="padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 3px; cursor: pointer;">Deselect All</button>
+        <div id="view-controls" style="display: none; margin-bottom: 8px; display: flex; gap: 4px; justify-content: space-between;">
+            <div style="display: flex; gap: 4px;">
+                <button id="expand-all" style="padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 3px; cursor: pointer;">Expand All</button>
+                <button id="collapse-all" style="padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 3px; cursor: pointer;">Collapse All</button>
+                <button id="select-all" style="padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 3px; cursor: pointer;">Select All</button>
+                <button id="deselect-all" style="padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 3px; cursor: pointer;">Deselect All</button>
+            </div>
+            <button id="toggle-view" style="padding: 4px 8px; font-size: 11px; background: #2196F3; color: white; border: 1px solid #1976D2; border-radius: 3px; cursor: pointer;">📋 Flat View</button>
         </div>
 
         <input type="text" id="search-box" placeholder="Search URLs..." style="display: none;">

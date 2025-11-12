@@ -2,6 +2,7 @@
 
 let discoveredUrls = [];
 let currentTab = null;
+let currentViewMode = 'tree'; // 'tree' or 'flat'
 
 console.log('[Popup] Script loaded');
 
@@ -43,6 +44,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('collapse-all').addEventListener('click', collapseAllNodes);
     document.getElementById('select-all').addEventListener('click', selectAllNodes);
     document.getElementById('deselect-all').addEventListener('click', deselectAllNodes);
+
+    // View toggle button
+    document.getElementById('toggle-view').addEventListener('click', toggleViewMode);
+
+    // Load view mode preference
+    const storage = await chrome.storage.local.get(['viewMode']);
+    if (storage.viewMode) {
+        currentViewMode = storage.viewMode;
+    }
 
     // Listen for progress updates
     chrome.runtime.onMessage.addListener((message) => {
@@ -219,7 +229,14 @@ async function mapSite() {
 
         if (response.success) {
             discoveredUrls = response.urls;
-            displayUrls(discoveredUrls);
+
+            // Display URLs in the current view mode
+            if (currentViewMode === 'tree') {
+                displayUrls(discoveredUrls);
+            } else {
+                displayUrlsFlat(discoveredUrls);
+            }
+
             showStatus(`✓ Found ${discoveredUrls.length} URLs`, 'success');
 
             // Show URL list and extraction controls
@@ -227,7 +244,7 @@ async function mapSite() {
             document.getElementById('extraction-controls').style.display = 'block';
             document.getElementById('search-box').style.display = 'block';
             document.getElementById('link-filters').style.display = 'flex';
-            document.getElementById('tree-controls').style.display = 'flex';
+            document.getElementById('view-controls').style.display = 'flex';
         } else {
             showStatus(`Error: ${response.error}`, 'error');
         }
@@ -424,8 +441,131 @@ function displayUrls(urls) {
         urlList.appendChild(treeNode);
     });
 
-    // Show tree controls
-    document.getElementById('tree-controls').style.display = 'flex';
+    // Show view controls
+    document.getElementById('view-controls').style.display = 'flex';
+
+    // Update expand/collapse button visibility based on view mode
+    updateViewControlsVisibility();
+}
+
+// Display URLs in flat list view
+function displayUrlsFlat(urls) {
+    const urlList = document.getElementById('url-list');
+    urlList.innerHTML = '';
+
+    if (urls.length === 0) {
+        urlList.innerHTML = '<div style="color: #666; text-align: center; padding: 12px;">No URLs found</div>';
+        return;
+    }
+
+    urls.forEach((urlData, index) => {
+        const item = document.createElement('div');
+        item.className = 'url-item';
+        item.dataset.url = urlData.url;
+        item.dataset.type = urlData.type;
+        item.style.cssText = 'display: flex; align-items: center; padding: 6px; margin-bottom: 4px; background: #f9f9f9; border-radius: 3px; font-size: 11px;';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'flat-checkbox';
+        checkbox.id = `flat-url-${index}`;
+        checkbox.checked = urlData.type === 'internal';
+        checkbox.dataset.url = urlData.url;
+        checkbox.style.marginRight = '8px';
+
+        const label = document.createElement('span');
+        label.textContent = urlData.url;
+        label.title = urlData.url;
+        label.style.cssText = 'flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px;';
+
+        const badge = document.createElement('span');
+        badge.style.cssText = 'font-size: 10px; padding: 2px 6px; border-radius: 3px; flex-shrink: 0;';
+        if (urlData.type === 'internal') {
+            badge.style.background = '#e3f2fd';
+            badge.style.color = '#1976d2';
+            badge.textContent = 'INT';
+        } else if (urlData.type === 'external') {
+            badge.style.background = '#fff3e0';
+            badge.style.color = '#e65100';
+            badge.textContent = 'EXT';
+        } else {
+            badge.style.background = '#f3e5f5';
+            badge.style.color = '#7b1fa2';
+            badge.textContent = 'MEDIA';
+        }
+
+        item.appendChild(checkbox);
+        item.appendChild(label);
+        item.appendChild(badge);
+        urlList.appendChild(item);
+    });
+
+    // Show view controls
+    document.getElementById('view-controls').style.display = 'flex';
+
+    // Update expand/collapse button visibility based on view mode
+    updateViewControlsVisibility();
+}
+
+// Toggle between tree and flat view
+function toggleViewMode() {
+    // Save current checkbox states
+    const checkedUrls = new Set();
+    if (currentViewMode === 'tree') {
+        document.querySelectorAll('.tree-node-checkbox:checked').forEach(cb => {
+            checkedUrls.add(cb.dataset.url);
+        });
+    } else {
+        document.querySelectorAll('.flat-checkbox:checked').forEach(cb => {
+            checkedUrls.add(cb.dataset.url);
+        });
+    }
+
+    // Toggle mode
+    currentViewMode = currentViewMode === 'tree' ? 'flat' : 'tree';
+
+    // Save preference
+    chrome.storage.local.set({ viewMode: currentViewMode });
+
+    // Re-render with new mode
+    if (currentViewMode === 'tree') {
+        displayUrls(discoveredUrls);
+    } else {
+        displayUrlsFlat(discoveredUrls);
+    }
+
+    // Restore checkbox states
+    setTimeout(() => {
+        const checkboxes = currentViewMode === 'tree'
+            ? document.querySelectorAll('.tree-node-checkbox')
+            : document.querySelectorAll('.flat-checkbox');
+
+        checkboxes.forEach(cb => {
+            if (checkedUrls.has(cb.dataset.url)) {
+                cb.checked = true;
+            }
+        });
+    }, 10);
+
+    // Update toggle button text
+    updateViewControlsVisibility();
+}
+
+// Update view controls visibility based on current mode
+function updateViewControlsVisibility() {
+    const toggleButton = document.getElementById('toggle-view');
+    const expandButton = document.getElementById('expand-all');
+    const collapseButton = document.getElementById('collapse-all');
+
+    if (currentViewMode === 'tree') {
+        toggleButton.textContent = '📋 Flat View';
+        expandButton.style.display = 'inline-block';
+        collapseButton.style.display = 'inline-block';
+    } else {
+        toggleButton.textContent = '🌳 Tree View';
+        expandButton.style.display = 'none';
+        collapseButton.style.display = 'none';
+    }
 }
 
 // Expand all tree nodes
@@ -454,7 +594,8 @@ function collapseAllNodes() {
 
 // Select all checkboxes
 function selectAllNodes() {
-    document.querySelectorAll('.tree-node-checkbox').forEach(cb => {
+    const checkboxSelector = currentViewMode === 'tree' ? '.tree-node-checkbox' : '.flat-checkbox';
+    document.querySelectorAll(checkboxSelector).forEach(cb => {
         cb.checked = true;
         cb.indeterminate = false;
     });
@@ -462,7 +603,8 @@ function selectAllNodes() {
 
 // Deselect all checkboxes
 function deselectAllNodes() {
-    document.querySelectorAll('.tree-node-checkbox').forEach(cb => {
+    const checkboxSelector = currentViewMode === 'tree' ? '.tree-node-checkbox' : '.flat-checkbox';
+    document.querySelectorAll(checkboxSelector).forEach(cb => {
         cb.checked = false;
         cb.indeterminate = false;
     });
@@ -494,7 +636,9 @@ function filterUrls() {
 // Extract selected pages
 async function extractSelectedPages() {
     try {
-        const checkboxes = document.querySelectorAll('.tree-node-checkbox:checked');
+        // Get checked checkboxes from either view
+        const checkboxSelector = currentViewMode === 'tree' ? '.tree-node-checkbox:checked' : '.flat-checkbox:checked';
+        const checkboxes = document.querySelectorAll(checkboxSelector);
         const selectedUrls = Array.from(checkboxes).map(cb => cb.dataset.url);
 
         if (selectedUrls.length === 0) {
@@ -1173,11 +1317,43 @@ async function loadJobContext(job) {
                 console.log('[Jobs] urlDataList missing, reconstructing from discovered_urls');
                 const startUrl = job.params?.start_url || job.result.discovered_urls[0];
 
-                urlDataList = job.result.discovered_urls.map((url, index) => ({
-                    url: url,
-                    type: 'internal',  // Default to internal
-                    level: index === 0 ? 0 : 1,  // First URL is root, others are level 1
-                    parent: index === 0 ? null : startUrl  // First URL is root, others are children of root
+                // Extract base domain from start URL for type detection
+                let startDomain = '';
+                try {
+                    startDomain = new URL(startUrl).hostname;
+                } catch (e) {
+                    console.warn('[Jobs] Could not parse start URL:', startUrl);
+                }
+
+                urlDataList = job.result.discovered_urls.map((url, index) => {
+                    // Detect URL type
+                    let type = 'internal';
+                    try {
+                        const urlObj = new URL(url);
+                        const urlDomain = urlObj.hostname;
+                        const urlPath = urlObj.pathname.toLowerCase();
+
+                        // Check if it's a media file by extension
+                        const mediaExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.svg', '.webp', '.ico',
+                                                '.mp4', '.webm', '.ogg', '.mp3', '.wav', '.pdf'];
+                        const isMedia = mediaExtensions.some(ext => urlPath.endsWith(ext));
+
+                        if (isMedia) {
+                            type = 'media';
+                        } else if (urlDomain !== startDomain) {
+                            type = 'external';
+                        }
+                    } catch (e) {
+                        // If URL parsing fails, default to internal
+                        console.warn('[Jobs] Could not parse URL:', url);
+                    }
+
+                    return {
+                        url: url,
+                        type: type,
+                        level: index === 0 ? 0 : 1,
+                        parent: index === 0 ? null : startUrl
+                    };
                 }));
 
                 console.log('[Jobs] Reconstructed urlDataList:', urlDataList.length, 'items');
@@ -1198,15 +1374,19 @@ async function loadJobContext(job) {
                 // Store the URLs globally
                 discoveredUrls = urlDataList;
 
-                // Display URLs in tree view
-                displayUrls(urlDataList);
+                // Display URLs in the current view mode
+                if (currentViewMode === 'tree') {
+                    displayUrls(urlDataList);
+                } else {
+                    displayUrlsFlat(urlDataList);
+                }
 
                 // Show URL list and extraction controls
                 document.getElementById('url-list').classList.add('show');
                 document.getElementById('extraction-controls').style.display = 'block';
                 document.getElementById('search-box').style.display = 'block';
                 document.getElementById('link-filters').style.display = 'flex';
-                document.getElementById('tree-controls').style.display = 'flex';
+                document.getElementById('view-controls').style.display = 'flex';
 
                 showStatus(`Loaded ${urlDataList.length} URLs from site mapping job`, 'success');
             } else {
