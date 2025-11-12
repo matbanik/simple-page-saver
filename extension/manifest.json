@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Simple Page Saver",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Extract web content as markdown files using AI-powered processing",
   "permissions": [
     "tabs",
