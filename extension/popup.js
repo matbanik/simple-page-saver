@@ -1110,11 +1110,12 @@ function displayJobs(jobs) {
     const jobsSection = document.getElementById('jobs-section');
     const clearButton = document.getElementById('clear-completed-jobs');
 
-    // Show ALL jobs (processing, pending, recently completed/failed)
+    // Show ALL jobs (processing, pending, paused, recently completed/failed)
     // Only filter out old completed jobs (> 1 hour)
     const relevantJobs = jobs.filter(job =>
         job.status === 'processing' ||
         job.status === 'pending' ||
+        job.status === 'paused' ||
         (job.status === 'completed' && isRecent(job.completed_at)) ||
         (job.status === 'failed' && isRecent(job.completed_at))
     );

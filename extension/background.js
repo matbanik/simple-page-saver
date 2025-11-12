@@ -569,12 +569,24 @@ async function handleMapSite(startUrl, depth) {
 
             processedUrls.add(url);
 
-            // Open tab and extract links
-            const tab = await chrome.tabs.create({ url, active: false });
-            await waitForTabLoad(tab.id);
-            await sleep(1000); // Shorter delay for mapping
-
+            let tab = null;
             try {
+                // Open tab with timeout
+                console.log(`[Map] Processing URL ${processedUrls.size}/${urlsToProcess.length + processedUrls.size}: ${url}`);
+
+                tab = await Promise.race([
+                    chrome.tabs.create({ url, active: false }),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Tab creation timeout')), 30000))
+                ]);
+
+                // Wait for page load with timeout
+                await Promise.race([
+                    waitForTabLoad(tab.id),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Page load timeout')), 30000))
+                ]);
+
+                await sleep(1000); // Shorter delay for mapping
+
                 const pageData = await extractPageData(tab.id);
 
                 // Extract links using backend
@@ -583,6 +595,7 @@ async function handleMapSite(startUrl, depth) {
                 // Close tab after extraction
                 try {
                     await chrome.tabs.remove(tab.id);
+                    tab = null; // Mark as closed
                 } catch (tabError) {
                     console.warn('[Map] Could not close tab:', tabError.message);
                 }
@@ -632,8 +645,15 @@ async function handleMapSite(startUrl, depth) {
                     }).catch(err => console.warn('[Map] Failed to update progress:', err));
                 }
             } catch (error) {
-                console.error(`Error processing ${url}:`, error);
-                await chrome.tabs.remove(tab.id).catch(() => {});
+                console.error(`[Map] Error processing ${url}:`, error);
+                // Try to close tab if it was created
+                if (tab) {
+                    try {
+                        await chrome.tabs.remove(tab.id);
+                    } catch (tabError) {
+                        console.warn('[Map] Could not close tab after error:', tabError.message);
+                    }
+                }
             }
         }
 
@@ -876,18 +896,31 @@ async function continueSiteMapping(jobId, savedState) {
 
             processedUrls.add(url);
 
-            // Open tab and extract links
-            const tab = await chrome.tabs.create({ url, active: false });
-            await waitForTabLoad(tab.id);
-            await sleep(1000);
-
+            let tab = null;
             try {
+                // Open tab with timeout
+                console.log(`[Map Resume] Processing URL ${processedUrls.size}/${urlsToProcess.length + processedUrls.size}: ${url}`);
+
+                tab = await Promise.race([
+                    chrome.tabs.create({ url, active: false }),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Tab creation timeout')), 30000))
+                ]);
+
+                // Wait for page load with timeout
+                await Promise.race([
+                    waitForTabLoad(tab.id),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Page load timeout')), 30000))
+                ]);
+
+                await sleep(1000);
+
                 const pageData = await extractPageData(tab.id);
                 const links = await extractLinks(pageData.html, url);
 
                 // Close tab
                 try {
                     await chrome.tabs.remove(tab.id);
+                    tab = null; // Mark as closed
                 } catch (tabError) {
                     console.warn('[Map] Could not close tab:', tabError.message);
                 }
@@ -936,8 +969,15 @@ async function continueSiteMapping(jobId, savedState) {
                     }).catch(err => console.warn('[Map] Failed to update progress:', err));
                 }
             } catch (error) {
-                console.error(`Error processing ${url}:`, error);
-                await chrome.tabs.remove(tab.id).catch(() => {});
+                console.error(`[Map Resume] Error processing ${url}:`, error);
+                // Try to close tab if it was created
+                if (tab) {
+                    try {
+                        await chrome.tabs.remove(tab.id);
+                    } catch (tabError) {
+                        console.warn('[Map] Could not close tab after error:', tabError.message);
+                    }
+                }
             }
         }
 
