@@ -14,6 +14,18 @@ const DELAY_AFTER_LOAD = 2000; // Wait 2 seconds after page load for dynamic con
 console.log('[Simple Page Saver] Background service worker loaded');
 console.log('[Simple Page Saver] JSZip available:', typeof JSZip !== 'undefined');
 
+// Utility function to sanitize filenames by removing invalid characters
+function sanitizeFilename(filename) {
+    // Replace invalid filename characters with underscores
+    // Invalid characters: / \ : * ? " < > |
+    return filename
+        .replace(/[/\\:*?"<>|]/g, '_')
+        .replace(/\s+/g, '_')  // Replace whitespace with underscores
+        .replace(/_{2,}/g, '_') // Replace multiple underscores with single underscore
+        .replace(/^_+|_+$/g, '') // Remove leading/trailing underscores
+        .substring(0, 200); // Limit filename length to 200 characters
+}
+
 // Initialize job storage
 console.log('[JobStorage] Initializing IndexedDB...');
 jobStorage.init().then(() => {
