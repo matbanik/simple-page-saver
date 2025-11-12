@@ -324,7 +324,7 @@ async def process_html(request: ProcessHTMLRequest):
         if not request.use_ai:
             logger.info("AI disabled by user, using Trafilatura/html2text fallback")
             log_ai_request(logger, "fallback", len(cleaned_html), {})
-            markdown, used_ai, error = request_converter.convert_to_markdown(cleaned_html, request.title, "")
+            markdown, used_ai, error = request_converter.convert_to_markdown(cleaned_html, request.title, "", use_ai=False)
             log_ai_response(logger, "fallback", len(markdown), False, error)
         else:
             # Always use convert_large_html() - it automatically determines if chunking is needed

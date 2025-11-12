@@ -387,19 +387,29 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
                 if (pdfData) {
                     console.log('[Extract] PDF generated successfully, size:', pdfData.byteLength, 'bytes');
 
-                    // Download the PDF
+                    // Download the PDF using data URL (works in service workers, unlike URL.createObjectURL)
                     const blob = new Blob([pdfData], { type: 'application/pdf' });
-                    const pdfUrl = URL.createObjectURL(blob);
+                    const reader = new FileReader();
                     const filename = sanitizeFilename(pageData.title || 'page') + '.pdf';
 
-                    await chrome.downloads.download({
-                        url: pdfUrl,
-                        filename: filename,
-                        saveAs: false
+                    await new Promise((resolve, reject) => {
+                        reader.onloadend = async () => {
+                            try {
+                                await chrome.downloads.download({
+                                    url: reader.result,
+                                    filename: filename,
+                                    saveAs: false
+                                });
+                                console.log('[Extract] PDF downloaded:', filename);
+                                warnings.addGeneric('print', `PDF saved as ${filename} (A0 size, no backgrounds)`);
+                                resolve();
+                            } catch (err) {
+                                reject(err);
+                            }
+                        };
+                        reader.onerror = reject;
+                        reader.readAsDataURL(blob);
                     });
-
-                    console.log('[Extract] PDF downloaded:', filename);
-                    warnings.addGeneric('print', `PDF saved as ${filename} (A0 size, no backgrounds)`);
                 } else {
                     throw new Error('PDF generation returned no data');
                 }

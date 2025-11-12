@@ -151,7 +151,7 @@ Guidelines:
             logger.debug(f"[Model Context] OpenRouter API query failed: {e}")
             return None
 
-    def convert_to_markdown(self, html: str, title: str = "", custom_prompt: str = "") -> Tuple[str, bool, Optional[str]]:
+    def convert_to_markdown(self, html: str, title: str = "", custom_prompt: str = "", use_ai: bool = True) -> Tuple[str, bool, Optional[str]]:
         """
         Convert HTML to Markdown using AI or fallback chain
         Fallback order: AI -> Trafilatura -> html2text
@@ -160,15 +160,16 @@ Guidelines:
             html: Preprocessed HTML string
             title: Page title
             custom_prompt: Optional custom instructions for AI processing
+            use_ai: Whether to use AI conversion (default: True)
 
         Returns:
             Tuple of (markdown_content, used_ai, error_message)
         """
         logger.info(f"[CONVERSION START] HTML size: {len(html)} chars, Title: '{title}'")
-        logger.info(f"[CONVERSION] API key available: {bool(self.api_key)}")
+        logger.info(f"[CONVERSION] API key available: {bool(self.api_key)}, use_ai: {use_ai}")
 
-        # Try AI conversion first if API key is available
-        if self.api_key:
+        # Try AI conversion first if API key is available AND use_ai is True
+        if self.api_key and use_ai:
             try:
                 logger.info("[CONVERSION] Attempting AI conversion...")
                 markdown = self._convert_with_ai(html, title, custom_prompt)
