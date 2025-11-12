@@ -287,6 +287,10 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
             if (infiniteScrollResult.hasInfiniteScroll) {
                 warnings.addInfiniteScrollWarning(url, infiniteScrollResult.confidence);
             }
+
+            // Additional wait for screenshot to ensure page is fully rendered
+            console.log('[Extract] Waiting for page to stabilize before screenshot...');
+            await sleep(2000); // Extra 2 second delay for screenshots
         }
 
         // Extract HTML from the page
@@ -508,12 +512,16 @@ async function handleMapSite(startUrl, depth) {
         const storage = await chrome.storage.local.get(['apiUrl']);
         const apiUrl = storage.apiUrl || 'http://localhost:8077';
 
+        // Create descriptive title for the job
+        const jobTitle = `Site Map: ${startUrl}`;
+
         const jobResponse = await fetch(`${apiUrl}/site-map/start`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 start_url: startUrl,
-                max_depth: depth
+                max_depth: depth,
+                title: jobTitle
             })
         });
 
@@ -645,6 +653,10 @@ async function handleMapSite(startUrl, depth) {
             // Update job in IndexedDB with saved state
             const job = await jobStorage.getJob(jobId);
             if (job) {
+                // Ensure params object exists
+                if (!job.params) {
+                    job.params = {};
+                }
                 job.params.saved_state = jobState;
                 job.status = 'paused';
                 job.result = {
@@ -937,6 +949,10 @@ async function continueSiteMapping(jobId, savedState) {
 
             const job = await jobStorage.getJob(jobId);
             if (job) {
+                // Ensure params object exists
+                if (!job.params) {
+                    job.params = {};
+                }
                 job.params.saved_state = jobState;
                 job.status = 'paused';
                 job.result = {
@@ -969,7 +985,11 @@ async function continueSiteMapping(jobId, savedState) {
                     total_discovered: discoveredUrls.size,
                     urlDataList: urlDataList
                 };
-                job.params.saved_state = null; // Clear saved state
+                // Clear saved state
+                if (!job.params) {
+                    job.params = {};
+                }
+                job.params.saved_state = null;
                 await jobStorage.saveJob(job);
             }
 
