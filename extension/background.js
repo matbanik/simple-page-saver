@@ -1136,7 +1136,9 @@ async function handleResumeJob(jobId) {
         // Continue site mapping from saved state (Bug fix: check both params and result)
         const savedState = (job.params && job.params.saved_state) || (job.result && job.result.saved_state);
 
-        if (job.type === 'site_map' && savedState) {
+        // Bug fix: Don't check job.type since backend doesn't return it
+        // Only site_map jobs have saved_state, so checking for savedState is enough
+        if (savedState) {
             console.log('[Job] Continuing site mapping from saved state...');
             console.log('[Job] URLs to process:', savedState.urlsToProcess?.length || 0);
             await continueSiteMapping(jobId, savedState);
