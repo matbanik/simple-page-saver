@@ -60,6 +60,30 @@ const siteMappingState = {
     warnings: null // WarningsTracker instance for collecting warnings during site mapping
 };
 
+// Restore site mapping state from storage on service worker start
+(async function restoreMappingState() {
+    try {
+        const stored = await chrome.storage.local.get(['activeMappingJobId']);
+        if (stored.activeMappingJobId) {
+            console.log('[Startup] Restoring active mapping job:', stored.activeMappingJobId);
+            siteMappingState.currentJobId = stored.activeMappingJobId;
+        }
+    } catch (error) {
+        console.error('[Startup] Failed to restore mapping state:', error);
+    }
+})();
+
+// Save current job ID to storage
+async function saveActiveMappingJob(jobId) {
+    if (jobId) {
+        await chrome.storage.local.set({ activeMappingJobId: jobId });
+        console.log('[State] Saved active mapping job:', jobId);
+    } else {
+        await chrome.storage.local.remove('activeMappingJobId');
+        console.log('[State] Cleared active mapping job');
+    }
+}
+
 // Start periodic health monitoring
 startHealthMonitoring();
 
@@ -667,6 +691,7 @@ async function handleMapSite(startUrl, depth) {
             jobId = jobData.job_id;
             siteMappingState.currentJobId = jobId;
             siteMappingState.isPaused = false;
+            await saveActiveMappingJob(jobId);
 
             // Initialize warnings tracker for site mapping
             siteMappingState.warnings = new WarningsTracker();
@@ -923,6 +948,10 @@ async function handleMapSite(startUrl, depth) {
 
                 await jobStorage.saveJob(job);
             }
+
+            // Clear active job ID after completion
+            siteMappingState.currentJobId = null;
+            await saveActiveMappingJob(null);
         }
 
         const warningsMsg = siteMappingState.warnings && siteMappingState.warnings.hasWarnings()
@@ -1038,6 +1067,7 @@ async function handleResumeJob(jobId) {
         // Clear local pause flag
         siteMappingState.currentJobId = jobId;
         siteMappingState.isPaused = false;
+        await saveActiveMappingJob(jobId);
 
         // Update backend
         const storage = await chrome.storage.local.get(['apiEndpoint']);
@@ -1312,6 +1342,10 @@ async function continueSiteMapping(jobId, savedState) {
                 await jobStorage.saveJob(job);
             }
 
+            // Clear active job ID after completion
+            siteMappingState.currentJobId = null;
+            await saveActiveMappingJob(null);
+
             const warningsMsg = siteMappingState.warnings && siteMappingState.warnings.hasWarnings()
                 ? ` (${siteMappingState.warnings.count()} warnings)`
                 : '';
@@ -1333,6 +1367,7 @@ async function handleStopJob(jobId) {
         if (siteMappingState.currentJobId === jobId) {
             siteMappingState.isPaused = true;
             siteMappingState.currentJobId = null;
+            await saveActiveMappingJob(null);
         }
 
         // Update backend (if job exists there)
