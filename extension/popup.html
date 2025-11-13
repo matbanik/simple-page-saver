@@ -60,6 +60,24 @@
             cursor: pointer;
         }
 
+        input[type="checkbox"]:disabled {
+            cursor: not-allowed;
+            opacity: 0.4;
+        }
+
+        label.disabled-option {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        label.disabled-option input[type="checkbox"] {
+            cursor: not-allowed;
+        }
+
+        label.disabled-option span {
+            color: #999;
+        }
+
         select, input[type="number"] {
             padding: 6px 8px;
             border: 1px solid #ccc;
@@ -606,6 +624,10 @@
         </div>
         <div id="current-tab-content" style="margin-top: 8px;">
             <div style="margin-bottom: 8px;">
+                <label id="download-ai-content-label" style="display: block; margin-bottom: 4px;">
+                    <input type="checkbox" id="download-ai-content">
+                    <span>Download AI processed page content (markdown)</span>
+                </label>
                 <label style="display: block; margin-bottom: 4px;">
                     <input type="checkbox" id="download-content" checked>
                     <span>Download page content (markdown)</span>
@@ -616,7 +638,7 @@
                 </label>
                 <label style="display: block; margin-bottom: 4px;">
                     <input type="checkbox" id="download-external-links">
-                    <span>Download external links</span>
+                    <span>Download external links as list</span>
                 </label>
                 <label style="display: block; margin-bottom: 8px;">
                     <input type="checkbox" id="print-to-pdf">
@@ -679,6 +701,10 @@
             <div id="url-list"></div>
 
             <div style="margin-top: 8px; display: none;" id="extraction-controls">
+                <label id="add-ai-processing-bulk-label" style="display: block; margin-bottom: 4px;">
+                    <input type="checkbox" id="add-ai-processing-bulk">
+                    <span>Add AI processing</span>
+                </label>
                 <label style="display: block; margin-bottom: 4px;">
                     <input type="checkbox" id="merge-into-single">
                     <span>Merge into single file</span>
@@ -722,14 +748,14 @@
         <div id="settings-content" style="margin-top: 8px;">
             <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
                 <input type="checkbox" id="enable-ai">
-                <span>Enable AI Processing (costs money)</span>
+                <span>Enable AI Processing</span>
             </label>
             <div id="ai-status" style="font-size: 11px; color: #666; padding: 4px 8px; background: #f0f0f0; border-radius: 3px; display: none;"></div>
 
             <div style="margin-top: 12px;">
                 <label style="font-size: 12px; font-weight: 500; display: block; margin-bottom: 4px;">
-                    Fallback Extraction Mode:
-                    <span style="font-size: 10px; color: #999; font-weight: normal;">(when AI is disabled)</span>
+                    Backend Extraction Mode:
+                    <span style="font-size: 10px; color: #999; font-weight: normal;">(for standard processing)</span>
                 </label>
                 <select id="extraction-mode" style="width: 100%; padding: 6px; font-size: 12px; margin-bottom: 4px;">
                     <option value="balanced">Balanced - Standard extraction</option>
@@ -737,7 +763,7 @@
                     <option value="precision">Precision - Cleaner output (more filtering)</option>
                 </select>
                 <div style="font-size: 10px; color: #666; padding: 4px; background: #f9f9f9; border-radius: 3px;">
-                    Uses Trafilatura for intelligent content extraction without AI
+                    Uses Trafilatura for intelligent content extraction
                 </div>
             </div>
 

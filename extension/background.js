@@ -477,15 +477,31 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
             }
         }
 
-        let result = null;
+        let aiResult = null;
+        let standardResult = null;
         let externalLinks = [];
 
-        // Process with backend if content is requested
-        if (downloadOptions.content) {
-            console.log('[Extract] Sending to backend for processing...');
-            result = await processWithBackend(url, pageData.html, pageData.title);
-            console.log('[Extract] Backend response received:', result.filename);
+        // Process with AI if AI content is requested
+        if (downloadOptions.aiContent) {
+            console.log('[Extract] Sending to backend for AI processing...');
+            try {
+                aiResult = await processWithBackendPerJob(url, pageData.html, pageData.title, true);
+                console.log('[Extract] AI backend response received:', aiResult.filename);
+            } catch (error) {
+                console.error('[Extract] AI processing failed:', error);
+                warnings.addGeneric('ai', `AI processing failed: ${error.message}`);
+            }
         }
+
+        // Process with standard backend if content is requested
+        if (downloadOptions.content) {
+            console.log('[Extract] Sending to backend for standard processing...');
+            standardResult = await processWithBackendPerJob(url, pageData.html, pageData.title, false);
+            console.log('[Extract] Standard backend response received:', standardResult.filename);
+        }
+
+        // Use standardResult as the primary result for compatibility
+        let result = standardResult || aiResult;
 
         // Extract links if media or external links requested
         if (downloadOptions.mediaLinks || downloadOptions.externalLinks) {
@@ -525,10 +541,21 @@ async function handleExtractSinglePage(url, outputZip = false, downloadOptions =
             });
         }
 
-        if (downloadOptions.content && result && result.markdown) {
+        // Add AI processed content if requested and available
+        if (downloadOptions.aiContent && aiResult && aiResult.markdown) {
+            // Add "-ai" suffix to filename before extension
+            const aiFilename = aiResult.filename.replace(/\.md$/, '-ai.md');
             filesToDownload.push({
-                content: result.markdown,
-                filename: result.filename
+                content: aiResult.markdown,
+                filename: aiFilename
+            });
+        }
+
+        // Add standard processed content if requested and available
+        if (downloadOptions.content && standardResult && standardResult.markdown) {
+            filesToDownload.push({
+                content: standardResult.markdown,
+                filename: standardResult.filename
             });
         }
 
@@ -1503,7 +1530,7 @@ async function handleCompleteNowJob(jobId) {
 }
 
 // Extract multiple pages
-async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = false, printToPdf = false) {
+async function handleExtractMultiplePages(urls, outputZip, addAIProcessing = false, mergeIntoSingle = false, printToPdf = false) {
     // Check backend health first
     const health = await checkBackendHealth();
     if (!health.healthy) {
@@ -1517,10 +1544,14 @@ async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = fal
     showNotification('Batch Extraction', `Processing ${urls.length} pages...`);
 
     try {
-        const results = [];
+        const standardResults = [];
+        const aiResults = [];
         const allMediaUrls = new Set();
         const pdfFiles = []; // Track PDF files separately
         let processed = 0;
+
+        // Initialize warnings tracker
+        const warnings = new WarningsTracker();
 
         // Send progress update
         sendProgressUpdate(0, urls.length, 'Starting extraction...');
@@ -1537,12 +1568,24 @@ async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = fal
                 // Extract data
                 const pageData = await extractPageData(tab.id);
 
-                // Process with backend
-                const result = await processWithBackend(url, pageData.html, pageData.title);
+                // Process with standard backend (always runs by default)
+                const standardResult = await processWithBackendPerJob(url, pageData.html, pageData.title, false);
+                standardResult.sourceUrl = url;
+                standardResults.push(standardResult);
 
-                // Add source URL to result for merged output
-                result.sourceUrl = url;
-                results.push(result);
+                // Process with AI if requested
+                if (addAIProcessing) {
+                    try {
+                        const aiResult = await processWithBackendPerJob(url, pageData.html, pageData.title, true);
+                        aiResult.sourceUrl = url;
+                        // Add -ai suffix to filename
+                        aiResult.filename = aiResult.filename.replace(/\.md$/, '-ai.md');
+                        aiResults.push(aiResult);
+                    } catch (aiError) {
+                        console.error('[Extract Multi] AI processing failed for', url, ':', aiError);
+                        warnings.addGeneric('ai', `AI processing failed for ${url}: ${aiError.message}`);
+                    }
+                }
 
                 // Generate PDF if requested
                 if (printToPdf) {
@@ -1597,9 +1640,9 @@ async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = fal
                     }
                 }
 
-                // Collect media URLs
-                if (result.media_urls) {
-                    result.media_urls.forEach(url => allMediaUrls.add(url));
+                // Collect media URLs from standard result
+                if (standardResult.media_urls) {
+                    standardResult.media_urls.forEach(url => allMediaUrls.add(url));
                 }
 
                 // Close tab after successful processing
@@ -1610,7 +1653,8 @@ async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = fal
                 }
 
                 processed++;
-                sendProgressUpdate(processed, urls.length, `Processed: ${result.filename}`);
+                const statusMsg = addAIProcessing ? `Processed (std+AI): ${standardResult.filename}` : `Processed: ${standardResult.filename}`;
+                sendProgressUpdate(processed, urls.length, statusMsg);
 
             } catch (error) {
                 console.error(`Error processing ${url}:`, error);
@@ -1627,30 +1671,56 @@ async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = fal
             }
         }
 
+        // Add warnings.txt if there are any warnings
+        const filesToDownload = [];
+        if (warnings.hasWarnings()) {
+            const warningsText = warnings.exportAsText();
+            filesToDownload.push({
+                content: warningsText,
+                filename: 'warnings.txt'
+            });
+            console.log(`[Extract Multi] ${warnings.count()} warnings will be included in download`);
+        }
+
         // Download results
         if (mergeIntoSingle) {
-            // Merge all markdown content into single file
-            const mergedContent = createMergedMarkdown(results, Array.from(allMediaUrls));
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
-            const mergedFilename = `merged_pages_${results.length}_${timestamp}.md`;
+
+            // Create standard merged file
+            const standardMergedContent = createMergedMarkdown(standardResults, Array.from(allMediaUrls));
+            const standardMergedFilename = `merged_pages_${standardResults.length}_${timestamp}.md`;
+            filesToDownload.push({ markdown: standardMergedContent, filename: standardMergedFilename });
+
+            // Create AI merged file if AI processing was requested
+            if (addAIProcessing && aiResults.length > 0) {
+                const aiMergedContent = createMergedMarkdown(aiResults, Array.from(allMediaUrls));
+                const aiMergedFilename = `merged_pages_${aiResults.length}_${timestamp}-ai.md`;
+                filesToDownload.push({ markdown: aiMergedContent, filename: aiMergedFilename });
+            }
 
             if (outputZip) {
-                // Create ZIP with single merged file and individual PDFs (if any)
-                await createAndDownloadZipWithPdfs([{ markdown: mergedContent, filename: mergedFilename }], Array.from(allMediaUrls), pdfFiles);
-                let message = `Merged ${results.length} pages into single file in ZIP`;
+                // Create ZIP with merged files and individual PDFs (if any)
+                await createAndDownloadZipWithPdfs(filesToDownload, Array.from(allMediaUrls), pdfFiles);
+                let message = addAIProcessing ? `Merged ${standardResults.length} pages (standard + AI) into ZIP` : `Merged ${standardResults.length} pages into ZIP`;
                 if (pdfFiles.length > 0) {
                     message += ` with ${pdfFiles.length} PDFs`;
                 }
                 showNotification('Batch Extraction Complete', message);
             } else {
-                // Download single merged file
-                await downloadFile(mergedContent, mergedFilename);
+                // Download merged files
+                for (const file of filesToDownload) {
+                    if (file.markdown) {
+                        await downloadFile(file.markdown, file.filename);
+                    } else if (file.content) {
+                        await downloadFile(file.content, file.filename);
+                    }
+                }
                 // Download media links file
                 if (allMediaUrls.size > 0) {
                     const mediaContent = Array.from(allMediaUrls).join('\n');
                     await downloadFile(mediaContent, 'media_links.txt');
                 }
-                // Download individual PDFs (not merged)
+                // Download individual PDFs
                 for (const pdf of pdfFiles) {
                     const blob = new Blob([pdf.data], { type: 'application/pdf' });
                     const url = URL.createObjectURL(blob);
@@ -1660,26 +1730,36 @@ async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = fal
                         saveAs: false
                     });
                 }
-                let message = `Merged ${results.length} pages into single file`;
+                let message = addAIProcessing ? `Merged ${standardResults.length} pages (standard + AI)` : `Merged ${standardResults.length} pages`;
                 if (pdfFiles.length > 0) {
                     message += ` with ${pdfFiles.length} PDFs`;
                 }
                 showNotification('Batch Extraction Complete', message);
             }
         } else {
-            // Original behavior: individual files or ZIP with multiple files
+            // Individual files or ZIP with multiple files
+            const allResults = [...standardResults, ...aiResults];
+
             if (outputZip) {
-                // Create ZIP file with PDFs
-                await createAndDownloadZipWithPdfs(results, Array.from(allMediaUrls), pdfFiles);
-                let message = `Extracted ${results.length} pages into ZIP file`;
+                // Combine standard and AI results for ZIP
+                const zipResults = [...standardResults, ...aiResults].concat(filesToDownload.map(f => ({ markdown: f.content || f.markdown, filename: f.filename })));
+                await createAndDownloadZipWithPdfs(zipResults, Array.from(allMediaUrls), pdfFiles);
+                let message = addAIProcessing ? `Extracted ${standardResults.length} pages (standard + AI) into ZIP` : `Extracted ${standardResults.length} pages into ZIP`;
                 if (pdfFiles.length > 0) {
                     message += ` with ${pdfFiles.length} PDFs`;
                 }
                 showNotification('Batch Extraction Complete', message);
             } else {
                 // Download individual files
-                for (const result of results) {
+                for (const result of allResults) {
                     await downloadFile(result.markdown, result.filename);
+                }
+
+                // Download warnings file
+                for (const file of filesToDownload) {
+                    if (file.content) {
+                        await downloadFile(file.content, file.filename);
+                    }
                 }
 
                 // Download individual PDFs
@@ -1699,7 +1779,7 @@ async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = fal
                     await downloadFile(mediaContent, 'media_links.txt');
                 }
 
-                let message = `Extracted ${results.length} pages as individual files`;
+                let message = addAIProcessing ? `Extracted ${standardResults.length} pages (standard + AI)` : `Extracted ${standardResults.length} pages`;
                 if (pdfFiles.length > 0) {
                     message += ` with ${pdfFiles.length} PDFs`;
                 }
@@ -1709,7 +1789,7 @@ async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = fal
 
         return {
             success: true,
-            processed: results.length
+            processed: standardResults.length
         };
     } catch (error) {
         console.error('Extract multiple pages error:', error);
@@ -1898,6 +1978,71 @@ async function processWithBackend(url, html, title) {
             throw error;
         }
     }, 'Process HTML', 3); // 3 retries for processing
+}
+
+// Process HTML with backend for per-job AI control (with retry logic)
+async function processWithBackendPerJob(url, html, title, useAI) {
+    // Get API URL, custom prompt, and extraction mode from chrome.storage
+    const storage = await chrome.storage.local.get(['apiEndpoint', 'customPrompt', 'extractionMode']);
+    const apiUrl = storage.apiEndpoint || API_BASE_URL;
+    const customPrompt = useAI ? (storage.customPrompt || '') : ''; // Only use custom prompt for AI
+    const extractionMode = storage.extractionMode || 'balanced'; // Default to balanced
+
+    console.log('[Backend PerJob] Using API URL:', apiUrl);
+    console.log('[Backend PerJob] Use AI:', useAI);
+    console.log('[Backend PerJob] Extraction mode:', extractionMode);
+    if (customPrompt) {
+        console.log('[Backend PerJob] Custom prompt:', customPrompt.substring(0, 100) + '...');
+    }
+
+    // Wrap fetch in retry logic
+    return await retryWithBackoff(async () => {
+        try {
+            const response = await fetch(`${apiUrl}/process-html`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    url,
+                    html,
+                    title,
+                    use_ai: useAI,
+                    custom_prompt: customPrompt,
+                    extraction_mode: extractionMode
+                }),
+                signal: AbortSignal.timeout(120000) // 120 second timeout for large pages
+            });
+
+            console.log('[Backend PerJob] Response status:', response.status);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('[Backend PerJob] Error response:', errorText);
+                throw new Error(`Backend error: ${response.status} ${response.statusText}`);
+            }
+
+            const result = await response.json();
+
+            // Update connection state on success
+            connectionState.isConnected = true;
+            connectionState.lastSuccessfulPing = Date.now();
+
+            return result;
+        } catch (error) {
+            // Mark connection as potentially unhealthy
+            if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                connectionState.isConnected = false;
+            }
+
+            if (error.name === 'TimeoutError') {
+                throw new Error('Backend request timed out. The page may be too large.');
+            } else if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                throw new Error('Cannot connect to backend server. Retrying...');
+            }
+            throw error;
+        }
+    }, `Process HTML (${useAI ? 'AI' : 'Standard'})`, 3); // 3 retries for processing
 }
 
 // Extract links using backend (with retry logic)
