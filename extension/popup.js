@@ -625,20 +625,37 @@ function filterUrls() {
     const showExternal = document.getElementById('filter-external').checked;
     const showMedia = document.getElementById('filter-media').checked;
 
-    const treeNodes = document.querySelectorAll('.tree-node');
+    if (currentViewMode === 'tree') {
+        // Filter tree nodes
+        const treeNodes = document.querySelectorAll('.tree-node');
+        treeNodes.forEach(node => {
+            const url = node.dataset.url.toLowerCase();
+            const type = node.dataset.type;
 
-    treeNodes.forEach(node => {
-        const url = node.dataset.url.toLowerCase();
-        const type = node.dataset.type;
+            const matchesSearch = searchTerm === '' || url.includes(searchTerm);
+            const matchesType =
+                (type === 'internal' && showInternal) ||
+                (type === 'external' && showExternal) ||
+                (type === 'media' && showMedia);
 
-        const matchesSearch = url.includes(searchTerm);
-        const matchesType =
-            (type === 'internal' && showInternal) ||
-            (type === 'external' && showExternal) ||
-            (type === 'media' && showMedia);
+            node.style.display = (matchesSearch && matchesType) ? 'block' : 'none';
+        });
+    } else {
+        // Filter flat view items
+        const urlItems = document.querySelectorAll('.url-item');
+        urlItems.forEach(item => {
+            const url = item.dataset.url.toLowerCase();
+            const type = item.dataset.type;
 
-        node.style.display = (matchesSearch && matchesType) ? 'block' : 'none';
-    });
+            const matchesSearch = searchTerm === '' || url.includes(searchTerm);
+            const matchesType =
+                (type === 'internal' && showInternal) ||
+                (type === 'external' && showExternal) ||
+                (type === 'media' && showMedia);
+
+            item.style.display = (matchesSearch && matchesType) ? 'flex' : 'none';
+        });
+    }
 }
 
 // Extract selected pages
@@ -1860,22 +1877,35 @@ async function mapSiteFromUrl(url) {
 
     try {
         const result = await chrome.runtime.sendMessage({
-            action: 'mapSite',
+            action: 'MAP_SITE',
             url: url,
             depth: parseInt(depth)
         });
 
+        if (!result) {
+            throw new Error('No response from background worker');
+        }
+
         if (result.success) {
             discoveredUrls = result.urls;
+
             // Display URLs in the current view mode
             if (currentViewMode === 'tree') {
                 displayUrls(result.urls);
             } else {
                 displayUrlsFlat(result.urls);
             }
+
+            // Show URL list and extraction controls
+            document.getElementById('url-list').classList.add('show');
+            document.getElementById('extraction-controls').style.display = 'block';
+            document.getElementById('search-box').style.display = 'block';
+            document.getElementById('link-filters').style.display = 'flex';
+            document.getElementById('view-controls').style.display = 'flex';
+
             showStatus(`Discovered ${result.urls.length} URLs`, 'success');
         } else {
-            showStatus(`Error: ${result.error}`, 'error');
+            showStatus(`Error: ${result.error || 'Unknown error'}`, 'error');
         }
     } catch (error) {
         console.error('[Map Site] Error:', error);
