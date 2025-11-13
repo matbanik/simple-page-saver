@@ -626,8 +626,11 @@ function filterUrls() {
     const showMedia = document.getElementById('filter-media').checked;
 
     if (currentViewMode === 'tree') {
-        // Filter tree nodes
+        // Filter tree nodes (with proper parent-child visibility)
         const treeNodes = document.querySelectorAll('.tree-node');
+
+        // First pass: determine which nodes match the filter
+        const nodeMatchMap = new Map();
         treeNodes.forEach(node => {
             const url = node.dataset.url.toLowerCase();
             const type = node.dataset.type;
@@ -638,7 +641,30 @@ function filterUrls() {
                 (type === 'external' && showExternal) ||
                 (type === 'media' && showMedia);
 
-            node.style.display = (matchesSearch && matchesType) ? 'block' : 'none';
+            nodeMatchMap.set(node, matchesSearch && matchesType);
+        });
+
+        // Second pass: show nodes that match OR have matching descendants
+        // Process from bottom to top to propagate child matches to parents
+        const nodesArray = Array.from(treeNodes).reverse();
+        nodesArray.forEach(node => {
+            const hasMatchingDescendants = Array.from(node.querySelectorAll('.tree-node'))
+                .some(descendant => nodeMatchMap.get(descendant));
+
+            const shouldShow = nodeMatchMap.get(node) || hasMatchingDescendants;
+            node.style.display = shouldShow ? 'block' : 'none';
+
+            // Auto-expand parent nodes that have matching descendants (but don't match themselves)
+            if (!nodeMatchMap.get(node) && hasMatchingDescendants) {
+                const childrenContainer = node.querySelector(':scope > .tree-children');
+                if (childrenContainer) {
+                    childrenContainer.classList.add('expanded');
+                    const expandIcon = node.querySelector('.tree-expand-icon');
+                    if (expandIcon && !expandIcon.classList.contains('empty')) {
+                        expandIcon.textContent = '▼';
+                    }
+                }
+            }
         });
     } else {
         // Filter flat view items
