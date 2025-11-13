@@ -1446,7 +1446,35 @@ async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = fal
                 // Generate PDF if requested
                 if (printToPdf) {
                     try {
-                        const pdfData = await chrome.tabs.printToPDF(tabId, {});
+                        console.log('[Extract] Generating PDF for:', url);
+
+                        // Inject print styles before PDF generation
+                        await chrome.scripting.executeScript({
+                            target: { tabId: tabId },
+                            func: () => {
+                                const style = document.createElement('style');
+                                style.id = 'simple-page-saver-print-styles';
+                                style.textContent = `
+                                    @page {
+                                        size: A0;
+                                        margin: 0.5cm;
+                                    }
+                                    @media print {
+                                        body {
+                                            -webkit-print-color-adjust: exact !important;
+                                            print-color-adjust: exact !important;
+                                        }
+                                        * {
+                                            background: transparent !important;
+                                            background-image: none !important;
+                                        }
+                                    }
+                                `;
+                                document.head.appendChild(style);
+                            }
+                        });
+
+                        const pdfData = await generatePdfUsingCDP(tabId, pageData.title);
                         const pdfFilename = result.filename.replace('.md', '.pdf');
                         pdfFiles.push({
                             data: pdfData,
@@ -1454,6 +1482,15 @@ async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = fal
                             url: url
                         });
                         console.log('[Extract] Generated PDF:', pdfFilename);
+
+                        // Clean up styles
+                        await chrome.scripting.executeScript({
+                            target: { tabId: tabId },
+                            func: () => {
+                                const styleEl = document.getElementById('simple-page-saver-print-styles');
+                                if (styleEl) styleEl.remove();
+                            }
+                        });
                     } catch (pdfError) {
                         console.error('[Extract] Failed to generate PDF for', url, ':', pdfError);
                     }
