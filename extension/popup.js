@@ -82,6 +82,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     // AI toggle listener
     document.getElementById('enable-ai').addEventListener('change', handleAIToggle);
 
+    // Per-job AI option listeners
+    document.getElementById('download-ai-content').addEventListener('change', async (e) => {
+        await chrome.storage.local.set({ downloadAIContent: e.target.checked });
+        console.log('[Settings] Download AI content:', e.target.checked);
+    });
+
+    document.getElementById('add-ai-processing-bulk').addEventListener('change', async (e) => {
+        await chrome.storage.local.set({ addAIProcessingBulk: e.target.checked });
+        console.log('[Settings] Add AI processing bulk:', e.target.checked);
+    });
+
     // Prompt preset listener
     document.getElementById('prompt-presets').addEventListener('change', loadPromptPreset);
 
@@ -100,6 +111,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Load AI enabled setting
     await loadAISettings();
+
+    // Load per-job AI settings
+    await loadPerJobAISettings();
 
     // Load extraction mode setting
     await loadExtractionMode();
@@ -178,6 +192,7 @@ async function extractCurrentPage() {
         disableButtons(true);
 
         // Get download options
+        const downloadAIContent = document.getElementById('download-ai-content').checked;
         const downloadContent = document.getElementById('download-content').checked;
         const downloadMediaLinks = document.getElementById('download-media-links').checked;
         const downloadExternalLinks = document.getElementById('download-external-links').checked;
@@ -185,7 +200,7 @@ async function extractCurrentPage() {
         const useZip = document.getElementById('single-page-zip').checked;
 
         // Validate at least one option selected
-        if (!downloadContent && !downloadMediaLinks && !downloadExternalLinks && !printToPdf) {
+        if (!downloadAIContent && !downloadContent && !downloadMediaLinks && !downloadExternalLinks && !printToPdf) {
             showStatus('Please select at least one download option', 'error');
             disableButtons(false);
             return;
@@ -197,6 +212,7 @@ async function extractCurrentPage() {
             url: currentTab.url,
             outputZip: useZip,
             downloadOptions: {
+                aiContent: downloadAIContent,
                 content: downloadContent,
                 mediaLinks: downloadMediaLinks,
                 externalLinks: downloadExternalLinks,
@@ -698,6 +714,7 @@ async function extractSelectedPages() {
         }
 
         const outputZip = document.getElementById('output-zip').checked;
+        const addAIProcessing = document.getElementById('add-ai-processing-bulk').checked;
         const mergeIntoSingle = document.getElementById('merge-into-single').checked;
         const printToPdf = document.getElementById('site-mapping-print-to-pdf').checked;
 
@@ -710,6 +727,7 @@ async function extractSelectedPages() {
             action: 'EXTRACT_MULTIPLE_PAGES',
             urls: selectedUrls,
             outputZip: outputZip,
+            addAIProcessing: addAIProcessing,
             mergeIntoSingle: mergeIntoSingle,
             printToPdf: printToPdf
         });
@@ -896,11 +914,70 @@ async function handleAIToggle(event) {
 
     updateAIStatus(enableAI);
 
+    // Enable/disable per-job AI options based on global AI setting
+    updatePerJobAIOptions(enableAI);
+
     if (enableAI) {
-        showStatus('⚠️ AI Processing Enabled - This will incur costs!', 'info');
+        showStatus('⚠️ AI Processing Enabled', 'info');
     } else {
-        showStatus('✓ Using Free Fallback (html2text)', 'success');
+        showStatus('✓ AI Processing Disabled', 'success');
     }
+}
+
+// Update per-job AI options based on global AI setting
+function updatePerJobAIOptions(enableAI) {
+    const downloadAIContentCheckbox = document.getElementById('download-ai-content');
+    const downloadAIContentLabel = document.getElementById('download-ai-content-label');
+    const addAIProcessingBulkCheckbox = document.getElementById('add-ai-processing-bulk');
+    const addAIProcessingBulkLabel = document.getElementById('add-ai-processing-bulk-label');
+
+    if (enableAI) {
+        // Enable per-job AI options
+        downloadAIContentCheckbox.disabled = false;
+        downloadAIContentLabel.classList.remove('disabled-option');
+        addAIProcessingBulkCheckbox.disabled = false;
+        addAIProcessingBulkLabel.classList.remove('disabled-option');
+    } else {
+        // Disable and uncheck per-job AI options
+        downloadAIContentCheckbox.disabled = true;
+        downloadAIContentCheckbox.checked = false;
+        downloadAIContentLabel.classList.add('disabled-option');
+        addAIProcessingBulkCheckbox.disabled = true;
+        addAIProcessingBulkCheckbox.checked = false;
+        addAIProcessingBulkLabel.classList.add('disabled-option');
+
+        // Save the unchecked state
+        chrome.storage.local.set({
+            downloadAIContent: false,
+            addAIProcessingBulk: false
+        });
+    }
+}
+
+// Load per-job AI settings
+async function loadPerJobAISettings() {
+    const storage = await chrome.storage.local.get([
+        'enableAI',
+        'downloadAIContent',
+        'addAIProcessingBulk'
+    ]);
+
+    const enableAI = storage.enableAI ?? false;
+    const downloadAIContent = storage.downloadAIContent ?? false;
+    const addAIProcessingBulk = storage.addAIProcessingBulk ?? false;
+
+    // Set checkbox states
+    document.getElementById('download-ai-content').checked = downloadAIContent && enableAI;
+    document.getElementById('add-ai-processing-bulk').checked = addAIProcessingBulk && enableAI;
+
+    // Update enabled/disabled state based on global AI setting
+    updatePerJobAIOptions(enableAI);
+
+    console.log('[Settings] Per-job AI settings loaded:', {
+        downloadAIContent,
+        addAIProcessingBulk,
+        enableAI
+    });
 }
 
 // Update AI status display
@@ -912,13 +989,10 @@ function updateAIStatus(enableAI) {
         statusDiv.style.display = 'block';
         statusDiv.style.background = '#fff3cd';
         statusDiv.style.color = '#856404';
-        statusDiv.textContent = '⚠️ AI enabled - processing will cost money';
+        statusDiv.textContent = '⚠️ AI enabled - per-job AI options are now available';
         promptSection.style.display = 'block';  // Show custom prompt section
     } else {
-        statusDiv.style.display = 'block';
-        statusDiv.style.background = '#d4edda';
-        statusDiv.style.color = '#155724';
-        statusDiv.textContent = '✓ Free fallback mode (html2text)';
+        statusDiv.style.display = 'none'; // Hide status when AI is disabled
         promptSection.style.display = 'none';  // Hide custom prompt section
     }
 }
@@ -1215,7 +1289,7 @@ async function updateConnectionStatus() {
                             text += ' ⚠️ No API key';
                         }
                     } else {
-                        text += ' (Fallback mode)';
+                        text += ' (AI disabled)';
                     }
 
                     // Show time since last ping
