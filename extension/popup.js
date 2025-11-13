@@ -15,6 +15,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     currentTab = tabs[0];
     console.log('[Popup] Current tab:', currentTab?.url);
 
+    // Auto-populate URL field with current tab URL
+    if (currentTab && currentTab.url && !currentTab.url.startsWith('chrome://') && !currentTab.url.startsWith('chrome-extension://')) {
+        document.getElementById('manual-url-input').value = currentTab.url;
+    }
+
     // Check connection state
     updateConnectionStatus();
 
@@ -66,6 +71,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('test-backend').addEventListener('click', testBackend);
     document.getElementById('test-ai').addEventListener('click', testAI);
     document.getElementById('test-fallback').addEventListener('click', testFallback);
+
+    // Section toggle button listeners
+    document.getElementById('toggle-url').addEventListener('click', toggleUrl);
+    document.getElementById('toggle-current-tab').addEventListener('click', toggleCurrentTab);
+    document.getElementById('toggle-site-mapping').addEventListener('click', toggleSiteMapping);
+    document.getElementById('toggle-active-jobs').addEventListener('click', toggleActiveJobs);
+    document.getElementById('toggle-settings').addEventListener('click', toggleSettings);
 
     // AI toggle listener
     document.getElementById('enable-ai').addEventListener('change', handleAIToggle);
@@ -644,6 +656,7 @@ async function extractSelectedPages() {
 
         const outputZip = document.getElementById('output-zip').checked;
         const mergeIntoSingle = document.getElementById('merge-into-single').checked;
+        const printToPdf = document.getElementById('site-mapping-print-to-pdf').checked;
 
         showStatus(`Extracting ${selectedUrls.length} pages...`, 'info');
         disableButtons(true);
@@ -654,7 +667,8 @@ async function extractSelectedPages() {
             action: 'EXTRACT_MULTIPLE_PAGES',
             urls: selectedUrls,
             outputZip: outputZip,
-            mergeIntoSingle: mergeIntoSingle
+            mergeIntoSingle: mergeIntoSingle,
+            printToPdf: printToPdf
         });
 
         if (response.success) {
@@ -915,6 +929,76 @@ function toggleTests() {
     }
 }
 
+// Toggle URL section visibility
+function toggleUrl() {
+    const content = document.getElementById('url-content');
+    const toggleBtn = document.getElementById('toggle-url');
+
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        toggleBtn.textContent = 'Hide';
+    } else {
+        content.style.display = 'none';
+        toggleBtn.textContent = 'Show';
+    }
+}
+
+// Toggle Current Tab section visibility
+function toggleCurrentTab() {
+    const content = document.getElementById('current-tab-content');
+    const toggleBtn = document.getElementById('toggle-current-tab');
+
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        toggleBtn.textContent = 'Hide';
+    } else {
+        content.style.display = 'none';
+        toggleBtn.textContent = 'Show';
+    }
+}
+
+// Toggle Site Mapping section visibility
+function toggleSiteMapping() {
+    const content = document.getElementById('site-mapping-content');
+    const toggleBtn = document.getElementById('toggle-site-mapping');
+
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        toggleBtn.textContent = 'Hide';
+    } else {
+        content.style.display = 'none';
+        toggleBtn.textContent = 'Show';
+    }
+}
+
+// Toggle Active Jobs section visibility
+function toggleActiveJobs() {
+    const content = document.getElementById('active-jobs-content');
+    const toggleBtn = document.getElementById('toggle-active-jobs');
+
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        toggleBtn.textContent = 'Hide';
+    } else {
+        content.style.display = 'none';
+        toggleBtn.textContent = 'Show';
+    }
+}
+
+// Toggle Settings section visibility
+function toggleSettings() {
+    const content = document.getElementById('settings-content');
+    const toggleBtn = document.getElementById('toggle-settings');
+
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        toggleBtn.textContent = 'Hide';
+    } else {
+        content.style.display = 'none';
+        toggleBtn.textContent = 'Show';
+    }
+}
+
 // Test backend connection
 async function testBackend() {
     console.log('[Test] Testing backend connection...');
@@ -1165,7 +1249,8 @@ async function loadJobs() {
 // Display jobs in the UI
 function displayJobs(jobs) {
     const jobsList = document.getElementById('jobs-list');
-    const jobsSection = document.getElementById('jobs-section');
+    const activeJobsContent = document.getElementById('active-jobs-content');
+    const toggleActiveJobsBtn = document.getElementById('toggle-active-jobs');
     const clearButton = document.getElementById('clear-completed-jobs');
 
     // Show ALL jobs (processing, pending, paused, recently completed/failed)
@@ -1178,8 +1263,6 @@ function displayJobs(jobs) {
         (job.status === 'failed' && isRecent(job.completed_at))
     );
 
-    // Always show jobs section
-    jobsSection.style.display = 'block';
     jobsList.innerHTML = '';
 
     if (relevantJobs.length === 0) {
@@ -1187,6 +1270,12 @@ function displayJobs(jobs) {
         jobsList.innerHTML = '<div class="no-jobs">No active jobs</div>';
         clearButton.style.display = 'none';
     } else {
+        // Auto-expand Active Jobs section if there are jobs
+        if (activeJobsContent.style.display === 'none') {
+            activeJobsContent.style.display = 'block';
+            toggleActiveJobsBtn.textContent = 'Hide';
+        }
+
         // Show jobs
         relevantJobs.forEach(job => {
             const jobItem = createJobElement(job);

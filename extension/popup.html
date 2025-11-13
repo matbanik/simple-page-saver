@@ -580,173 +580,204 @@
         <span id="connection-text">Checking backend...</span>
     </div>
 
+    <!-- URL Section -->
+    <div class="section">
+        <div class="section-title">
+            <span>🔗 URL</span>
+            <button id="toggle-url" style="float: right; font-size: 11px; padding: 2px 8px; background: #f0f0f0; color: #666; border: 1px solid #ccc;">Hide</button>
+        </div>
+        <div id="url-content" style="margin-top: 8px;">
+            <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                <input type="text" id="manual-url-input" placeholder="Enter URL..." style="flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px;">
+                <select id="url-action-type" style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; min-width: 100px;">
+                    <option value="map">Map Site</option>
+                    <option value="scrape">Scrape Page</option>
+                </select>
+                <button id="execute-url-action" class="btn-primary" style="padding: 8px 16px;">Go</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Current Tab Section -->
+    <div class="section">
+        <div class="section-title">
+            <span>📄 Current Tab</span>
+            <button id="toggle-current-tab" style="float: right; font-size: 11px; padding: 2px 8px; background: #f0f0f0; color: #666; border: 1px solid #ccc;">Hide</button>
+        </div>
+        <div id="current-tab-content" style="margin-top: 8px;">
+            <div style="margin-bottom: 8px;">
+                <label style="display: block; margin-bottom: 4px;">
+                    <input type="checkbox" id="download-content" checked>
+                    <span>Download page content (markdown)</span>
+                </label>
+                <label style="display: block; margin-bottom: 4px;">
+                    <input type="checkbox" id="download-media-links">
+                    <span>Download media links (images, videos, etc.)</span>
+                </label>
+                <label style="display: block; margin-bottom: 4px;">
+                    <input type="checkbox" id="download-external-links">
+                    <span>Download external links</span>
+                </label>
+                <label style="display: block; margin-bottom: 8px;">
+                    <input type="checkbox" id="print-to-pdf">
+                    <span>Print to PDF</span>
+                </label>
+                <label style="display: block; margin-bottom: 8px;">
+                    <input type="checkbox" id="single-page-zip">
+                    <span>Package as ZIP file</span>
+                </label>
+            </div>
+            <button id="extract-current" class="btn-primary">Start Scrapping</button>
+        </div>
+    </div>
+
+    <!-- Site Mapping Section -->
+    <div class="section">
+        <div class="section-title">
+            <span>🗺️ Site Mapping</span>
+            <button id="toggle-site-mapping" style="float: right; font-size: 11px; padding: 2px 8px; background: #f0f0f0; color: #666; border: 1px solid #ccc;">Show</button>
+        </div>
+        <div id="site-mapping-content" style="display: none; margin-top: 8px;">
+            <div class="controls">
+                <label for="depth-select">Depth:</label>
+                <select id="depth-select">
+                    <option value="0">0 (Current page only)</option>
+                    <option value="1">1 (+ Direct links)</option>
+                    <option value="2">2 (Two levels deep)</option>
+                    <option value="3">3 (Three levels deep)</option>
+                </select>
+                <button id="map-site" class="btn-secondary">Map Site</button>
+            </div>
+
+            <div class="link-type-filters" id="link-filters" style="display: none;">
+                <label>
+                    <input type="checkbox" id="filter-internal" checked>
+                    Internal
+                </label>
+                <label>
+                    <input type="checkbox" id="filter-external">
+                    External
+                </label>
+                <label>
+                    <input type="checkbox" id="filter-media">
+                    Media
+                </label>
+            </div>
+
+            <div id="view-controls" style="display: none; margin-bottom: 8px; display: flex; gap: 4px; justify-content: space-between;">
+                <div style="display: flex; gap: 4px;">
+                    <button id="expand-all" style="padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 3px; cursor: pointer;">Expand All</button>
+                    <button id="collapse-all" style="padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 3px; cursor: pointer;">Collapse All</button>
+                    <button id="select-all" style="padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 3px; cursor: pointer;">Select All</button>
+                    <button id="deselect-all" style="padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 3px; cursor: pointer;">Deselect All</button>
+                </div>
+                <button id="toggle-view" style="padding: 4px 8px; font-size: 11px; background: #2196F3; color: white; border: 1px solid #1976D2; border-radius: 3px; cursor: pointer;">📋 Flat View</button>
+            </div>
+
+            <input type="text" id="search-box" placeholder="Search URLs..." style="display: none;">
+
+            <div id="url-list"></div>
+
+            <div style="margin-top: 8px; display: none;" id="extraction-controls">
+                <label style="display: block; margin-bottom: 4px;">
+                    <input type="checkbox" id="merge-into-single">
+                    <span>Merge into single file</span>
+                </label>
+                <label style="display: block; margin-bottom: 4px;">
+                    <input type="checkbox" id="site-mapping-print-to-pdf">
+                    <span>Print to PDF</span>
+                </label>
+                <label style="display: block; margin-bottom: 8px;">
+                    <input type="checkbox" id="output-zip" checked>
+                    <span>Download as ZIP</span>
+                </label>
+                <button id="extract-selected" class="btn-primary" style="margin-top: 4px; width: 100%;">
+                    Extract Selected Pages
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Active Jobs Section -->
-    <div id="jobs-section" class="section" style="display: none;">
-        <div class="section-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+    <div class="section">
+        <div class="section-title">
             <span>📋 Active Jobs</span>
-            <div style="display: flex; gap: 4px;">
+            <button id="toggle-active-jobs" style="float: right; font-size: 11px; padding: 2px 8px; background: #f0f0f0; color: #666; border: 1px solid #ccc;">Show</button>
+        </div>
+        <div id="active-jobs-content" style="display: none; margin-top: 8px;">
+            <div style="display: flex; gap: 4px; margin-bottom: 8px; justify-content: flex-end;">
                 <button id="clear-completed-jobs" style="padding: 2px 8px; font-size: 11px; background: #ffebee; color: #c62828; border: none; border-radius: 3px; cursor: pointer; display: none;">Clear Completed</button>
                 <button id="refresh-jobs" style="padding: 2px 8px; font-size: 11px; background: #e0e0e0; border: none; border-radius: 3px; cursor: pointer;">Refresh</button>
             </div>
+            <div id="jobs-list"></div>
         </div>
-        <div id="jobs-list"></div>
     </div>
 
+    <!-- Settings Section -->
     <div class="section">
-        <div class="section-title">⚙️ Settings</div>
-        <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-            <input type="checkbox" id="enable-ai">
-            <span>Enable AI Processing (costs money)</span>
-        </label>
-        <div id="ai-status" style="font-size: 11px; color: #666; padding: 4px 8px; background: #f0f0f0; border-radius: 3px; display: none;"></div>
-
-        <div style="margin-top: 12px;">
-            <label style="font-size: 12px; font-weight: 500; display: block; margin-bottom: 4px;">
-                Fallback Extraction Mode:
-                <span style="font-size: 10px; color: #999; font-weight: normal;">(when AI is disabled)</span>
-            </label>
-            <select id="extraction-mode" style="width: 100%; padding: 6px; font-size: 12px; margin-bottom: 4px;">
-                <option value="balanced">Balanced - Standard extraction</option>
-                <option value="recall">Recall - Capture more content (less filtering)</option>
-                <option value="precision">Precision - Cleaner output (more filtering)</option>
-            </select>
-            <div style="font-size: 10px; color: #666; padding: 4px; background: #f9f9f9; border-radius: 3px;">
-                Uses Trafilatura for intelligent content extraction without AI
-            </div>
+        <div class="section-title">
+            <span>⚙️ Settings</span>
+            <button id="toggle-settings" style="float: right; font-size: 11px; padding: 2px 8px; background: #f0f0f0; color: #666; border: 1px solid #ccc;">Hide</button>
         </div>
-
-        <div style="margin-top: 12px;">
-            <label style="font-size: 12px; font-weight: 500; display: block; margin-bottom: 4px;">
-                Chunking Settings:
-                <span style="font-size: 10px; color: #999; font-weight: normal;">(for large documents)</span>
+        <div id="settings-content" style="margin-top: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                <input type="checkbox" id="enable-ai">
+                <span>Enable AI Processing (costs money)</span>
             </label>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 4px;">
-                <div>
-                    <label style="font-size: 11px; display: block; margin-bottom: 2px; color: #666;">Worker Count:</label>
-                    <input type="number" id="worker-count" min="1" max="16" value="4" style="width: 100%; padding: 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px;">
-                </div>
-                <div>
-                    <label style="font-size: 11px; display: block; margin-bottom: 2px; color: #666;">Overlap (%):</label>
-                    <input type="number" id="overlap-percentage" min="0" max="50" value="10" style="width: 100%; padding: 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px;">
+            <div id="ai-status" style="font-size: 11px; color: #666; padding: 4px 8px; background: #f0f0f0; border-radius: 3px; display: none;"></div>
+
+            <div style="margin-top: 12px;">
+                <label style="font-size: 12px; font-weight: 500; display: block; margin-bottom: 4px;">
+                    Fallback Extraction Mode:
+                    <span style="font-size: 10px; color: #999; font-weight: normal;">(when AI is disabled)</span>
+                </label>
+                <select id="extraction-mode" style="width: 100%; padding: 6px; font-size: 12px; margin-bottom: 4px;">
+                    <option value="balanced">Balanced - Standard extraction</option>
+                    <option value="recall">Recall - Capture more content (less filtering)</option>
+                    <option value="precision">Precision - Cleaner output (more filtering)</option>
+                </select>
+                <div style="font-size: 10px; color: #666; padding: 4px; background: #f9f9f9; border-radius: 3px;">
+                    Uses Trafilatura for intelligent content extraction without AI
                 </div>
             </div>
-            <div style="font-size: 10px; color: #666; padding: 4px; background: #f9f9f9; border-radius: 3px;">
-                Workers: Parallel processing threads (higher = faster). Overlap: Context preservation between chunks.
+
+            <div style="margin-top: 12px;">
+                <label style="font-size: 12px; font-weight: 500; display: block; margin-bottom: 4px;">
+                    Chunking Settings:
+                    <span style="font-size: 10px; color: #999; font-weight: normal;">(for large documents)</span>
+                </label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 4px;">
+                    <div>
+                        <label style="font-size: 11px; display: block; margin-bottom: 2px; color: #666;">Worker Count:</label>
+                        <input type="number" id="worker-count" min="1" max="16" value="4" style="width: 100%; padding: 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px;">
+                    </div>
+                    <div>
+                        <label style="font-size: 11px; display: block; margin-bottom: 2px; color: #666;">Overlap (%):</label>
+                        <input type="number" id="overlap-percentage" min="0" max="50" value="10" style="width: 100%; padding: 6px; font-size: 12px; border: 1px solid #ccc; border-radius: 4px;">
+                    </div>
+                </div>
+                <div style="font-size: 10px; color: #666; padding: 4px; background: #f9f9f9; border-radius: 3px;">
+                    Workers: Parallel processing threads (higher = faster). Overlap: Context preservation between chunks.
+                </div>
             </div>
-        </div>
 
-        <div id="ai-prompt-section" style="display: none; margin-top: 12px;">
-            <label style="font-size: 12px; font-weight: 500; display: block; margin-bottom: 4px;">Custom AI Instructions:</label>
-            <select id="prompt-presets" style="width: 100%; padding: 6px; margin-bottom: 6px; font-size: 12px;">
-                <option value="">None</option>
-                <option value="custom">Write your own</option>
-                <option value="" disabled>──────────</option>
-                <option value="extract_products">Extract Product Details (Title, Price, Description)</option>
-                <option value="highlight_keyword">Highlight Specific Keyword</option>
-                <option value="price_comparison">Create Price Comparison Table</option>
-                <option value="extract_reviews">Extract Customer Reviews Summary</option>
-                <option value="contact_info">Extract Contact Information</option>
-                <option value="specs_table">Create Product Specifications Table</option>
-                <option value="link_summary">Summarize All Links and Resources</option>
-            </select>
-            <textarea id="custom-prompt" placeholder="Optional: Add custom instructions for AI processing..."
-                      style="width: 100%; height: 60px; padding: 6px; font-size: 12px; resize: vertical; font-family: inherit; display: none;"></textarea>
-        </div>
-    </div>
-
-    <div class="section">
-        <div class="section-title">URL</div>
-        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-            <input type="text" id="manual-url-input" placeholder="Enter URL..." style="flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px;">
-            <select id="url-action-type" style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; min-width: 100px;">
-                <option value="map">Map Site</option>
-                <option value="scrape">Scrape Page</option>
-            </select>
-            <button id="execute-url-action" class="btn-primary" style="padding: 8px 16px;">Go</button>
-        </div>
-    </div>
-
-    <div class="section">
-        <div class="section-title">Current Page</div>
-        <div style="margin-bottom: 8px;">
-            <label style="display: block; margin-bottom: 4px;">
-                <input type="checkbox" id="download-content" checked>
-                <span>Download page content (markdown)</span>
-            </label>
-            <label style="display: block; margin-bottom: 4px;">
-                <input type="checkbox" id="download-media-links">
-                <span>Download media links (images, videos, etc.)</span>
-            </label>
-            <label style="display: block; margin-bottom: 4px;">
-                <input type="checkbox" id="download-external-links">
-                <span>Download external links</span>
-            </label>
-            <label style="display: block; margin-bottom: 8px;">
-                <input type="checkbox" id="print-to-pdf">
-                <span>Print to PDF</span>
-            </label>
-            <label style="display: block; margin-bottom: 8px;">
-                <input type="checkbox" id="single-page-zip">
-                <span>Package as ZIP file</span>
-            </label>
-        </div>
-        <button id="extract-current" class="btn-primary">Extract Current Page</button>
-    </div>
-
-    <div class="section">
-        <div class="section-title">Site Mapping</div>
-        <div class="controls">
-            <label for="depth-select">Depth:</label>
-            <select id="depth-select">
-                <option value="0">0 (Current page only)</option>
-                <option value="1">1 (+ Direct links)</option>
-                <option value="2">2 (Two levels deep)</option>
-                <option value="3">3 (Three levels deep)</option>
-            </select>
-            <button id="map-site" class="btn-secondary">Map Site</button>
-        </div>
-
-        <div class="link-type-filters" id="link-filters" style="display: none;">
-            <label>
-                <input type="checkbox" id="filter-internal" checked>
-                Internal
-            </label>
-            <label>
-                <input type="checkbox" id="filter-external">
-                External
-            </label>
-            <label>
-                <input type="checkbox" id="filter-media">
-                Media
-            </label>
-        </div>
-
-        <div id="view-controls" style="display: none; margin-bottom: 8px; display: flex; gap: 4px; justify-content: space-between;">
-            <div style="display: flex; gap: 4px;">
-                <button id="expand-all" style="padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 3px; cursor: pointer;">Expand All</button>
-                <button id="collapse-all" style="padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 3px; cursor: pointer;">Collapse All</button>
-                <button id="select-all" style="padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 3px; cursor: pointer;">Select All</button>
-                <button id="deselect-all" style="padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 3px; cursor: pointer;">Deselect All</button>
+            <div id="ai-prompt-section" style="display: none; margin-top: 12px;">
+                <label style="font-size: 12px; font-weight: 500; display: block; margin-bottom: 4px;">Custom AI Instructions:</label>
+                <select id="prompt-presets" style="width: 100%; padding: 6px; margin-bottom: 6px; font-size: 12px;">
+                    <option value="">None</option>
+                    <option value="custom">Write your own</option>
+                    <option value="" disabled>──────────</option>
+                    <option value="extract_products">Extract Product Details (Title, Price, Description)</option>
+                    <option value="highlight_keyword">Highlight Specific Keyword</option>
+                    <option value="price_comparison">Create Price Comparison Table</option>
+                    <option value="extract_reviews">Extract Customer Reviews Summary</option>
+                    <option value="contact_info">Extract Contact Information</option>
+                    <option value="specs_table">Create Product Specifications Table</option>
+                    <option value="link_summary">Summarize All Links and Resources</option>
+                </select>
+                <textarea id="custom-prompt" placeholder="Optional: Add custom instructions for AI processing..."
+                          style="width: 100%; height: 60px; padding: 6px; font-size: 12px; resize: vertical; font-family: inherit; display: none;"></textarea>
             </div>
-            <button id="toggle-view" style="padding: 4px 8px; font-size: 11px; background: #2196F3; color: white; border: 1px solid #1976D2; border-radius: 3px; cursor: pointer;">📋 Flat View</button>
-        </div>
-
-        <input type="text" id="search-box" placeholder="Search URLs..." style="display: none;">
-
-        <div id="url-list"></div>
-
-        <div style="margin-top: 8px; display: none;" id="extraction-controls">
-            <label style="display: block; margin-bottom: 4px;">
-                <input type="checkbox" id="merge-into-single">
-                <span>Merge into single file</span>
-            </label>
-            <label style="display: block; margin-bottom: 8px;">
-                <input type="checkbox" id="output-zip" checked>
-                <span>Download as ZIP</span>
-            </label>
-            <button id="extract-selected" class="btn-primary" style="margin-top: 4px; width: 100%;">
-                Extract Selected Pages
-            </button>
         </div>
     </div>
 
