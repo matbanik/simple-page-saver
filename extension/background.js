@@ -1112,16 +1112,21 @@ async function continueSiteMapping(jobId, savedState) {
         console.log(`[Map] Resuming with ${urlsToProcess.length} URLs to process, ${discoveredUrls.size} discovered so far`);
 
         // Continue processing from where we left off
-        while (urlsToProcess.length > 0 && !siteMappingState.isPaused) {
+        while (urlsToProcess.length > 0 && !siteMappingState.isPaused && !siteMappingState.isCompleting) {
             const { url, level, parent } = urlsToProcess.shift();
 
             if (processedUrls.has(url) || level > depth) {
                 continue;
             }
 
-            // Check for pause
+            // Check for pause or completing
             if (siteMappingState.isPaused) {
                 console.log('[Map] Job paused during resume');
+                break;
+            }
+
+            if (siteMappingState.isCompleting) {
+                console.log('[Map] Job completing after current URL during resume');
                 break;
             }
 
@@ -1218,7 +1223,7 @@ async function continueSiteMapping(jobId, savedState) {
             }
         }
 
-        // Handle completion or pause
+        // Handle completion, pause, or completing
         if (siteMappingState.isPaused) {
             console.log('[Map] Saving paused state after resume...');
 
@@ -1262,10 +1267,17 @@ async function continueSiteMapping(jobId, savedState) {
                 ? ` (${siteMappingState.warnings.count()} warnings)`
                 : '';
             showNotification('Mapping Paused', `Paused at ${discoveredUrls.size} URLs discovered${warningsMsg}`);
-        } else {
-            // Complete the job
+        } else if (siteMappingState.isCompleting || urlsToProcess.length === 0) {
+            // Complete the job (either forced or naturally finished)
             console.log('[Map] Job completed after resume');
             const allUrls = Array.from(discoveredUrls);
+
+            // Reset completing flag
+            if (siteMappingState.isCompleting) {
+                siteMappingState.isCompleting = false;
+                console.log('[Map] Reset isCompleting flag');
+            }
+
             await fetch(`${apiUrl}/site-map/complete`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
