@@ -1049,16 +1049,24 @@ async function handlePauseJob(jobId) {
             console.warn('[Job] Failed to pause job on backend:', fetchError.message);
         }
 
-        // Save complete job to IndexedDB (Bug fix #3)
+        // Wait a moment for the mapping loop to save its state
+        // The mapping loop will detect isPaused and save the complete state
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Update status in IndexedDB, preserving any saved_state
         const job = await jobStorage.getJob(jobId);
         if (job) {
-            // Update with latest from backend
+            // Only update status, preserve saved_state if it exists
             job.status = 'paused';
             if (backendJob) {
                 job.progress = backendJob.progress || job.progress;
-                job.result = backendJob.result || job.result;
+                // Only update result if we don't have saved_state already
+                if (!job.params?.saved_state && !job.result?.saved_state) {
+                    job.result = backendJob.result || job.result;
+                }
             }
             await jobStorage.saveJob(job);
+            console.log('[Job] Job paused, has saved_state:', !!(job.params?.saved_state || job.result?.saved_state));
         } else if (backendJob) {
             // If not in IndexedDB, save the one from backend
             await jobStorage.saveJob(backendJob);
