@@ -296,6 +296,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .then(response => sendResponse(response))
             .catch(error => sendResponse({ success: false, error: error.message }));
         return true;
+    } else if (request.action === 'CLEAR_JOB_STATE') {
+        // Clear in-memory job state when a job is force-deleted
+        const jobId = request.jobId;
+        console.log('[Job] Clearing in-memory state for job:', jobId);
+
+        if (siteMappingState.currentJobId === jobId) {
+            siteMappingState.currentJobId = null;
+            siteMappingState.isPaused = false;
+            siteMappingState.isCompleting = false;
+            siteMappingState.discoveredUrls.clear();
+            siteMappingState.processedUrls.clear();
+            siteMappingState.urlsToProcess = [];
+            siteMappingState.urlDataList = [];
+            siteMappingState.parentMap.clear();
+            siteMappingState.warnings = null;
+            console.log('[Job] Cleared in-memory state for active job');
+        }
+
+        sendResponse({ success: true });
+        return false;
     }
 });
 
@@ -1061,7 +1081,16 @@ async function handleResumeJob(jobId) {
         // Get job from IndexedDB to retrieve saved state
         const job = await jobStorage.getJob(jobId);
         if (!job) {
-            throw new Error(`Job ${jobId} not found in IndexedDB`);
+            console.error(`[Job] Job ${jobId} not found in IndexedDB - clearing orphaned state`);
+
+            // Clean up orphaned active job ID
+            const stored = await chrome.storage.local.get(['activeMappingJobId']);
+            if (stored.activeMappingJobId === jobId) {
+                await chrome.storage.local.remove('activeMappingJobId');
+                console.log('[Job] Cleared orphaned active job ID from chrome.storage');
+            }
+
+            throw new Error(`Job ${jobId} not found in IndexedDB. The job may have been deleted or corrupted. Please remove this job and start a new one.`);
         }
 
         // Clear local pause flag
@@ -1069,19 +1098,27 @@ async function handleResumeJob(jobId) {
         siteMappingState.isPaused = false;
         await saveActiveMappingJob(jobId);
 
-        // Update backend
+        // Update backend (may not exist if backend restarted)
         const storage = await chrome.storage.local.get(['apiEndpoint']);
         const apiUrl = storage.apiEndpoint || 'http://localhost:8077';
 
-        const response = await fetch(`${apiUrl}/jobs/${jobId}/resume`, {
-            method: 'POST'
-        });
+        try {
+            const response = await fetch(`${apiUrl}/jobs/${jobId}/resume`, {
+                method: 'POST'
+            });
 
-        if (!response.ok) {
-            throw new Error(`Failed to resume job: ${response.statusText}`);
+            if (!response.ok && response.status !== 404) {
+                console.warn('[Job] Backend resume failed:', response.statusText);
+            }
+
+            if (response.ok) {
+                const result = await response.json();
+                console.log('[Job] Backend resume successful');
+            }
+        } catch (backendError) {
+            console.warn('[Job] Could not resume on backend:', backendError.message);
+            // Continue anyway - we have the job data locally
         }
-
-        const result = await response.json();
 
         // Save to IndexedDB
         await jobStorage.updateJobStatus(jobId, 'processing');
@@ -1102,7 +1139,7 @@ async function handleResumeJob(jobId) {
             console.warn('[Job] Has result.saved_state:', !!(job.result && job.result.saved_state));
         }
 
-        return { success: true, message: 'Job resumed', job: result.job };
+        return { success: true, message: 'Job resumed', job: job };
 
     } catch (error) {
         console.error(`[Job] Failed to resume job ${jobId}:`, error);
@@ -1392,6 +1429,13 @@ async function handleStopJob(jobId) {
         } catch (fetchError) {
             // Backend might be down, continue with local update
             console.warn('[Job] Failed to stop job on backend:', fetchError.message);
+        }
+
+        // Check if job exists in IndexedDB before updating
+        const job = await jobStorage.getJob(jobId);
+        if (!job) {
+            console.error(`[Job] Job ${jobId} not found in IndexedDB - cannot stop`);
+            throw new Error(`Job ${jobId} not found in IndexedDB. Please remove this job.`);
         }
 
         // Always update IndexedDB (stopped jobs are paused)

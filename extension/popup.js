@@ -1327,8 +1327,8 @@ function createJobElement(job) {
     const statusText = job.status.charAt(0).toUpperCase() + job.status.slice(1);
     const progress = job.progress || { current: 0, total: 0, message: '', percent: 0 };
 
-    // Show remove button for completed/failed jobs
-    const showRemoveButton = job.status === 'completed' || job.status === 'failed';
+    // Show remove button for ALL jobs (allows clearing frozen/stuck jobs)
+    const showRemoveButton = true;
 
     // Show load button for ALL completed jobs
     const showLoadButton = job.status === 'completed';
@@ -1620,6 +1620,23 @@ async function removeJob(jobId) {
     console.log('[Jobs] Removing job:', jobId);
 
     try {
+        // Clear active job ID from chrome.storage if this is the active job
+        const stored = await chrome.storage.local.get(['activeMappingJobId']);
+        if (stored.activeMappingJobId === jobId) {
+            await chrome.storage.local.remove('activeMappingJobId');
+            console.log('[Jobs] Cleared active job ID from chrome.storage');
+        }
+
+        // Notify background script to clear in-memory state
+        try {
+            await chrome.runtime.sendMessage({
+                action: 'CLEAR_JOB_STATE',
+                jobId: jobId
+            });
+        } catch (msgError) {
+            console.warn('[Jobs] Could not notify background script:', msgError.message);
+        }
+
         // Try to delete from backend first
         try {
             const apiUrl = await getBackendUrl();
@@ -1649,7 +1666,7 @@ async function removeJob(jobId) {
         // Refresh jobs list
         await loadJobs();
 
-        showStatus('Job removed', 'success');
+        showStatus('Job removed successfully', 'success');
     } catch (error) {
         console.error('[Jobs] Error removing job:', error);
         showStatus('Failed to remove job', 'error');
