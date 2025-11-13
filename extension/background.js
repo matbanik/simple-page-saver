@@ -242,7 +242,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
         return true;
     } else if (request.action === 'EXTRACT_MULTIPLE_PAGES') {
-        handleExtractMultiplePages(request.urls, request.outputZip, request.mergeIntoSingle)
+        handleExtractMultiplePages(request.urls, request.outputZip, request.mergeIntoSingle, request.printToPdf)
             .then(response => {
                 console.log('[Simple Page Saver] Multi-extract complete:', response);
                 sendResponse(response);
@@ -1402,7 +1402,7 @@ async function handleCompleteNowJob(jobId) {
 }
 
 // Extract multiple pages
-async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = false) {
+async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = false, printToPdf = false) {
     // Check backend health first
     const health = await checkBackendHealth();
     if (!health.healthy) {
@@ -1418,6 +1418,7 @@ async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = fal
     try {
         const results = [];
         const allMediaUrls = new Set();
+        const pdfFiles = []; // Track PDF files separately
         let processed = 0;
 
         // Send progress update
@@ -1441,6 +1442,22 @@ async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = fal
                 // Add source URL to result for merged output
                 result.sourceUrl = url;
                 results.push(result);
+
+                // Generate PDF if requested
+                if (printToPdf) {
+                    try {
+                        const pdfData = await chrome.tabs.printToPDF(tabId, {});
+                        const pdfFilename = result.filename.replace('.md', '.pdf');
+                        pdfFiles.push({
+                            data: pdfData,
+                            filename: pdfFilename,
+                            url: url
+                        });
+                        console.log('[Extract] Generated PDF:', pdfFilename);
+                    } catch (pdfError) {
+                        console.error('[Extract] Failed to generate PDF for', url, ':', pdfError);
+                    }
+                }
 
                 // Collect media URLs
                 if (result.media_urls) {
@@ -1480,9 +1497,13 @@ async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = fal
             const mergedFilename = `merged_pages_${results.length}_${timestamp}.md`;
 
             if (outputZip) {
-                // Create ZIP with single merged file
-                await createAndDownloadZip([{ markdown: mergedContent, filename: mergedFilename }], Array.from(allMediaUrls));
-                showNotification('Batch Extraction Complete', `Merged ${results.length} pages into single file in ZIP`);
+                // Create ZIP with single merged file and individual PDFs (if any)
+                await createAndDownloadZipWithPdfs([{ markdown: mergedContent, filename: mergedFilename }], Array.from(allMediaUrls), pdfFiles);
+                let message = `Merged ${results.length} pages into single file in ZIP`;
+                if (pdfFiles.length > 0) {
+                    message += ` with ${pdfFiles.length} PDFs`;
+                }
+                showNotification('Batch Extraction Complete', message);
             } else {
                 // Download single merged file
                 await downloadFile(mergedContent, mergedFilename);
@@ -1491,18 +1512,47 @@ async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = fal
                     const mediaContent = Array.from(allMediaUrls).join('\n');
                     await downloadFile(mediaContent, 'media_links.txt');
                 }
-                showNotification('Batch Extraction Complete', `Merged ${results.length} pages into single file`);
+                // Download individual PDFs (not merged)
+                for (const pdf of pdfFiles) {
+                    const blob = new Blob([pdf.data], { type: 'application/pdf' });
+                    const url = URL.createObjectURL(blob);
+                    await chrome.downloads.download({
+                        url: url,
+                        filename: pdf.filename,
+                        saveAs: false
+                    });
+                }
+                let message = `Merged ${results.length} pages into single file`;
+                if (pdfFiles.length > 0) {
+                    message += ` with ${pdfFiles.length} PDFs`;
+                }
+                showNotification('Batch Extraction Complete', message);
             }
         } else {
             // Original behavior: individual files or ZIP with multiple files
             if (outputZip) {
-                // Create ZIP file
-                await createAndDownloadZip(results, Array.from(allMediaUrls));
-                showNotification('Batch Extraction Complete', `Extracted ${results.length} pages into ZIP file`);
+                // Create ZIP file with PDFs
+                await createAndDownloadZipWithPdfs(results, Array.from(allMediaUrls), pdfFiles);
+                let message = `Extracted ${results.length} pages into ZIP file`;
+                if (pdfFiles.length > 0) {
+                    message += ` with ${pdfFiles.length} PDFs`;
+                }
+                showNotification('Batch Extraction Complete', message);
             } else {
                 // Download individual files
                 for (const result of results) {
                     await downloadFile(result.markdown, result.filename);
+                }
+
+                // Download individual PDFs
+                for (const pdf of pdfFiles) {
+                    const blob = new Blob([pdf.data], { type: 'application/pdf' });
+                    const url = URL.createObjectURL(blob);
+                    await chrome.downloads.download({
+                        url: url,
+                        filename: pdf.filename,
+                        saveAs: false
+                    });
                 }
 
                 // Download media links file
@@ -1511,7 +1561,11 @@ async function handleExtractMultiplePages(urls, outputZip, mergeIntoSingle = fal
                     await downloadFile(mediaContent, 'media_links.txt');
                 }
 
-                showNotification('Batch Extraction Complete', `Extracted ${results.length} pages as individual files`);
+                let message = `Extracted ${results.length} pages as individual files`;
+                if (pdfFiles.length > 0) {
+                    message += ` with ${pdfFiles.length} PDFs`;
+                }
+                showNotification('Batch Extraction Complete', message);
             }
         }
 
@@ -1779,6 +1833,75 @@ async function createAndDownloadZip(results, mediaUrls) {
             const filename = `${i + 1}_${result.filename}`;
             console.log('[ZIP] Adding file:', filename);
             zip.file(filename, result.markdown);
+        }
+
+        // Add media links file if there are any
+        if (mediaUrls.length > 0) {
+            const mediaContent = mediaUrls.join('\n');
+            console.log('[ZIP] Adding media_links.txt with', mediaUrls.length, 'URLs');
+            zip.file('media_links.txt', mediaContent);
+        }
+
+        // Generate ZIP file as blob
+        console.log('[ZIP] Generating ZIP archive...');
+        const blob = await zip.generateAsync({
+            type: 'blob',
+            compression: 'DEFLATE',
+            compressionOptions: { level: 6 }
+        });
+
+        console.log('[ZIP] ZIP created, size:', blob.size, 'bytes');
+
+        // Convert blob to data URL for download
+        const reader = new FileReader();
+        const dataUrl = await new Promise((resolve, reject) => {
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+
+        // Generate filename with timestamp
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const zipFilename = `page_saver_${timestamp}.zip`;
+
+        console.log('[ZIP] Downloading as:', zipFilename);
+
+        // Download the ZIP file
+        const downloadId = await chrome.downloads.download({
+            url: dataUrl,
+            filename: zipFilename,
+            saveAs: false
+        });
+
+        console.log('[ZIP] Download started, ID:', downloadId);
+    } catch (error) {
+        console.error('[ZIP] Error creating ZIP:', error);
+        throw new Error(`ZIP creation failed: ${error.message}`);
+    }
+}
+
+// Create ZIP with markdown files and PDFs
+async function createAndDownloadZipWithPdfs(results, mediaUrls, pdfFiles = []) {
+    console.log('[ZIP] Creating ZIP file with', results.length, 'pages and', pdfFiles.length, 'PDFs');
+
+    try {
+        // Create new JSZip instance
+        const zip = new JSZip();
+
+        // Add each markdown file to the ZIP
+        for (let i = 0; i < results.length; i++) {
+            const result = results[i];
+            const filename = `${i + 1}_${result.filename}`;
+            console.log('[ZIP] Adding file:', filename);
+            zip.file(filename, result.markdown);
+        }
+
+        // Add PDF files to the ZIP
+        for (let i = 0; i < pdfFiles.length; i++) {
+            const pdf = pdfFiles[i];
+            const filename = `${i + 1}_${pdf.filename}`;
+            console.log('[ZIP] Adding PDF:', filename);
+            zip.file(filename, pdf.data);
         }
 
         // Add media links file if there are any
