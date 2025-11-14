@@ -928,23 +928,29 @@ async function handleAIToggle(event) {
 function updatePerJobAIOptions(enableAI) {
     const downloadAIContentCheckbox = document.getElementById('download-ai-content');
     const downloadAIContentLabel = document.getElementById('download-ai-content-label');
+    const aiContentHint = document.getElementById('ai-content-hint');
     const addAIProcessingBulkCheckbox = document.getElementById('add-ai-processing-bulk');
     const addAIProcessingBulkLabel = document.getElementById('add-ai-processing-bulk-label');
+    const aiBulkHint = document.getElementById('ai-bulk-hint');
 
     if (enableAI) {
         // Enable per-job AI options
         downloadAIContentCheckbox.disabled = false;
         downloadAIContentLabel.classList.remove('disabled-option');
+        aiContentHint.style.display = 'none';
         addAIProcessingBulkCheckbox.disabled = false;
         addAIProcessingBulkLabel.classList.remove('disabled-option');
+        aiBulkHint.style.display = 'none';
     } else {
-        // Disable and uncheck per-job AI options
+        // Disable and uncheck per-job AI options (but keep them visible)
         downloadAIContentCheckbox.disabled = true;
         downloadAIContentCheckbox.checked = false;
         downloadAIContentLabel.classList.add('disabled-option');
+        aiContentHint.style.display = 'block';
         addAIProcessingBulkCheckbox.disabled = true;
         addAIProcessingBulkCheckbox.checked = false;
         addAIProcessingBulkLabel.classList.add('disabled-option');
+        aiBulkHint.style.display = 'block';
 
         // Save the unchecked state
         chrome.storage.local.set({
