@@ -62,12 +62,15 @@
 
         input[type="checkbox"]:disabled {
             cursor: not-allowed;
-            opacity: 0.4;
+            opacity: 0.6;
         }
 
         label.disabled-option {
-            opacity: 0.5;
             cursor: not-allowed;
+            background: #f9f9f9;  /* Light background to show it's a special option */
+            padding: 4px 6px;
+            border-radius: 3px;
+            border-left: 3px solid #ddd;  /* Visual indicator that this is disabled */
         }
 
         label.disabled-option input[type="checkbox"] {
@@ -75,7 +78,8 @@
         }
 
         label.disabled-option span {
-            color: #999;
+            color: #666;  /* Dark enough to be readable but clearly disabled */
+            font-style: italic;  /* Subtle visual cue */
         }
 
         select, input[type="number"] {
@@ -628,6 +632,9 @@
                     <input type="checkbox" id="download-ai-content">
                     <span>Download AI processed page content (markdown)</span>
                 </label>
+                <div id="ai-content-hint" style="display: none; font-size: 10px; color: #888; margin-left: 20px; margin-bottom: 4px; font-style: italic;">
+                    Enable AI Processing in Settings to use this option
+                </div>
                 <label style="display: block; margin-bottom: 4px;">
                     <input type="checkbox" id="download-content" checked>
                     <span>Download page content (markdown)</span>
@@ -705,6 +712,9 @@
                     <input type="checkbox" id="add-ai-processing-bulk">
                     <span>Add AI processing</span>
                 </label>
+                <div id="ai-bulk-hint" style="display: none; font-size: 10px; color: #888; margin-left: 20px; margin-bottom: 4px; font-style: italic;">
+                    Enable AI Processing in Settings to use this option
+                </div>
                 <label style="display: block; margin-bottom: 4px;">
                     <input type="checkbox" id="merge-into-single">
                     <span>Merge into single file</span>
