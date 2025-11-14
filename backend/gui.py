@@ -10,6 +10,7 @@ import psutil
 import threading
 import requests
 import sys
+import webbrowser
 from pathlib import Path
 
 from settings_manager import SettingsManager
@@ -93,6 +94,12 @@ class ServerGUI:
                                               variable=self.show_key_var,
                                               command=self.toggle_api_key_visibility)
         self.show_key_check.grid(row=0, column=1, padx=5)
+
+        # Get Key link
+        get_key_label = tk.Label(api_key_frame, text="Get Key", fg="blue", cursor="hand2",
+                                font=('Arial', 9, 'underline'))
+        get_key_label.grid(row=0, column=2, padx=5)
+        get_key_label.bind("<Button-1>", lambda e: webbrowser.open("https://openrouter.ai/settings/keys"))
         row += 1
 
         # Max Tokens
